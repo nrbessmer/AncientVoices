@@ -1,0 +1,13 @@
+build/
+cmake-build-*/
+.DS_Store
+*.xcuserdata/
+DerivedData/
+.vscode/
+.idea/
+JuceLibraryCode/
+*.vst3
+*.component
+*.app
+/tmp/av_build.log
+/tmp/av_rebuild.log

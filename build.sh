@@ -28,9 +28,9 @@ JUCE_DIR="$PROJECT/JUCE"
 # ── Plugin identity (must match CMakeLists.txt exactly) ───────────────────────
 PLUGIN_NAME="Ancient Voices"
 PRODUCT_NAME="AncientVoices"
-MANUFACTURER_CODE="Tuly"
-PLUGIN_CODE="AVoc"
-AU_TYPE="aumu"
+MANUFACTURER_CODE="Tull"
+PLUGIN_CODE="AV05"
+AU_TYPE="aufx"    # audio effect
 
 # ── Install destinations ───────────────────────────────────────────────────────
 AU_INSTALL="$HOME/Library/Audio/Plug-Ins/Components/${PLUGIN_NAME}.component"
@@ -171,14 +171,15 @@ BUILD_START=$SECONDS
 
 cmake --build "$BUILD_DIR" \
     --config "$CONFIG" \
-    --parallel "$JOBS" 2>&1 | tee /tmp/av_build.log | \
-    grep -E "(error:|warning:|Build FAILED|Linking|Compiling)" | \
-    grep -v "^$" | \
+    --parallel "$JOBS" \
+    --verbose 2>&1 | tee /tmp/av_build.log | \
     while IFS= read -r line; do
         if echo "$line" | grep -q "error:"; then
             echo -e "  ${RED}$line${RESET}"
         elif echo "$line" | grep -q "warning:"; then
             echo -e "  ${YELLOW}$line${RESET}"
+        elif echo "$line" | grep -qE "^(\[|Building|Linking|Compiling|Scanning|cd |clang|g\+\+|ar )"; then
+            echo "  $line"
         else
             echo "  $line"
         fi
@@ -214,6 +215,10 @@ if [[ -d "$AU_BUILD" ]]; then
     rm -rf "$AU_INSTALL"
     cp -r "$AU_BUILD" "$AU_INSTALL"
     ok "AU   → $AU_INSTALL"
+    # Also copy to system Components so Logic finds it
+    sudo rm -rf "/Library/Audio/Plug-Ins/Components/${PLUGIN_NAME}.component"
+    sudo cp -r "$AU_BUILD" "/Library/Audio/Plug-Ins/Components/${PLUGIN_NAME}.component"
+    ok "AU   → /Library/Audio/Plug-Ins/Components/${PLUGIN_NAME}.component"
 else
     warn "AU bundle not found at $AU_BUILD"
 fi
@@ -232,19 +237,25 @@ fi
 if [[ $RUN_AUVAL -eq 1 ]] && [[ -d "$AU_INSTALL" ]]; then
     echo ""
     echo "  Running auval..."
+
+    # Force macOS to re-register the newly installed component
     killall -q AudioComponentRegistrar 2>/dev/null || true
-    sleep 1
-    AUVAL_OUT=$(auval -v "${AU_TYPE}" "${PLUGIN_CODE}" "${MANUFACTURER_CODE}" 2>&1)
-    AUVAL_STATUS=$?
-    if echo "$AUVAL_OUT" | grep -q "\* \* PASS \* \*"; then
-        ok "auval  PASS"
-    elif [[ $AUVAL_STATUS -eq 0 ]]; then
-        ok "auval  passed"
+    killall -q coreaudiod 2>/dev/null || true
+    sleep 2
+
+    # Run auval — print ALL output so you can see what's happening
+    echo ""
+    echo "  ── auval output ─────────────────────────────────────────────"
+    auval -v "${AU_TYPE}" "${PLUGIN_CODE}" "${MANUFACTURER_CODE}" 2>&1 | tee /tmp/av_auval.log | sed 's/^/  /'
+    AUVAL_STATUS=${PIPESTATUS[0]}
+    echo "  ─────────────────────────────────────────────────────────────"
+    echo ""
+
+    if grep -q "\* \* PASS \* \*" /tmp/av_auval.log; then
+        ok "auval  PASS — plugin is valid for Logic Pro"
     else
-        warn "auval issues — see output below"
-        echo "$AUVAL_OUT" | grep -E "(FAIL|error)" | sed 's/^/    /' || true
-        echo ""
-        echo "$AUVAL_OUT" | sed 's/^/  /'
+        warn "auval did not PASS — check output above"
+        echo "  Full log saved to: /tmp/av_auval.log"
     fi
 fi
 
@@ -259,7 +270,7 @@ echo ""
 [[ -d "$APP_BUILD"    ]] && echo -e "  ${GREEN}✓${RESET}  App  $APP_BUILD"
 echo ""
 echo "  In Logic: Preferences → Plug-in Manager → Reset & Rescan"
-echo "  Look for: TullyTech → Ancient Voices"
+echo "  Look for: Tully EDM Vibe → Ancient Voices"
 echo ""
 echo "  Commands:"
 echo "    Full rebuild:    $PROJECT/build.sh --clean"

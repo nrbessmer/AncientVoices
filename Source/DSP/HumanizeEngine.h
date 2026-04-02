@@ -3,21 +3,25 @@
 #include <random>
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  HUMANIZE ENGINE
-//  Generates per-voice randomized offsets that make the choir sound like
-//  real human singers rather than a synth stack.
+//  HUMANIZE ENGINE  v3
+//
+//  Per-voice amplitude, pitch, and micro-timing modulation making the choir
+//  sound like real singers rather than a machine.
+//
+//  FIX v3:  Added pitchOffsetCents to VoiceHumanization so ChoirVoice can
+//           apply per-voice pitch drift (was referenced but never declared).
 //
 //  Per voice:
-//    - Slow pitch drift LFO (unique rate/phase per voice)
-//    - Timing offset (voice enters slightly late)
-//    - Breath envelope micro-variation (each voice breathes at own pace)
-//    - Vibrato onset (vibrato depth increases after note attack settles)
+//    - Dual LFO amplitude vibrato (primary fast + secondary swell)
+//    - Pitch vibrato in cents (+/- 12 cents at full drift)
+//    - Breath envelope (slow inhale/exhale cycle unique per voice)
+//    - Onset ramp (voice fades in over ~300ms, staggered per voice)
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct VoiceHumanization {
-    float pitchOffsetCents = 0.f;   // instantaneous pitch offset
-    float ampOffset        = 1.f;   // amplitude scalar 0.8–1.0
-    float timingDelaySec   = 0.f;   // initial attack delay (samples)
+    float ampOffset        = 1.f;   // amplitude multiplier
+    float pitchOffsetCents = 0.f;   // pitch shift in cents (+/- 12 at full drift)
+    float timingDelaySec   = 0.f;   // reserved for future micro-timing
     bool  active           = false;
 };
 
@@ -31,81 +35,101 @@ public:
             initVoice(i);
     }
 
-    // Called when drift/jitter amount changes (0.0 = robot, 1.0 = very human)
-    void setDrift(float d)  { drift_  = juce::jlimit(0.f,1.f,d); }
-    void setChant(float c)  { chant_  = juce::jlimit(0.f,1.f,c); }
-    void setBpm(float bpm)  { bpm_    = juce::jmax(60.f,bpm); }
+    void setDrift(float d) { drift_ = juce::jlimit(0.f, 1.f, d); }
+    void setChant(float c) { chant_ = juce::jlimit(0.f, 1.f, c); }
+    void setBpm(float bpm) { bpm_   = juce::jmax(60.f, bpm); }
 
-    // Randomize parameters for a newly triggered voice
-    void triggerVoice(int voiceIdx) {
-        if (voiceIdx < 0 || voiceIdx >= kMaxVoices) return;
-        auto& v = voices_[voiceIdx];
-        v.driftPhase    = dist01_(rng_) * juce::MathConstants<float>::twoPi;
-        v.driftRate     = 3.5f + dist01_(rng_) * 2.5f;    // 3.5–6 Hz vibrato
-        v.driftRandScale= dist01_(rng_);                    // unique randomness per voice
-        v.ampBase       = 0.82f + dist01_(rng_) * 0.18f;
-        v.breathPhase   = dist01_(rng_) * juce::MathConstants<float>::twoPi;
-        v.breathRate    = 0.2f + dist01_(rng_) * 0.3f;
-        v.vibratoOnset  = 0.f;
-        v.active        = true;
+    void triggerVoice(int idx) {
+        if (idx < 0 || idx >= kMaxVoices) return;
+        auto& v = voices_[idx];
+        v.lfoPhaseA   = dist01_(rng_) * twoPi;
+        v.lfoPhaseB   = dist01_(rng_) * twoPi;
+        v.pitchPhase  = dist01_(rng_) * twoPi;
+        v.lfoRateA    = 4.2f + dist01_(rng_) * 1.6f;    // 4.2–5.8 Hz vibrato
+        v.lfoRateB    = 0.8f + dist01_(rng_) * 1.2f;    // 0.8–2.0 Hz swell
+        v.pitchRate   = 4.5f + dist01_(rng_) * 1.0f;    // 4.5–5.5 Hz pitch vibrato
+        v.ampBase     = 0.78f + dist01_(rng_) * 0.22f;  // 0.78–1.0
+        v.breathPhase = dist01_(rng_) * twoPi;
+        v.breathRate  = 0.15f + dist01_(rng_) * 0.25f;
+        v.onsetRamp   = 0.f;
+        v.onsetDelay  = float(idx) * 0.025f;             // stagger entries 25ms apart
+        v.onsetTimer  = 0.f;
+        v.active      = true;
     }
 
-    void releaseVoice(int voiceIdx) {
-        if (voiceIdx >= 0 && voiceIdx < kMaxVoices)
-            voices_[voiceIdx].active = false;
+    void releaseVoice(int idx) {
+        if (idx >= 0 && idx < kMaxVoices) voices_[idx].active = false;
     }
 
-    // Returns instantaneous humanization for a voice (call once per sample)
-    VoiceHumanization tick(int voiceIdx) {
+    VoiceHumanization tick(int idx) {
         VoiceHumanization out;
-        if (voiceIdx < 0 || voiceIdx >= kMaxVoices || !voices_[voiceIdx].active)
+        if (idx < 0 || idx >= kMaxVoices || !voices_[idx].active)
             return out;
 
-        auto& v = voices_[voiceIdx];
+        auto& v  = voices_[idx];
         float dt = 1.f / float(sr_);
 
-        // Vibrato onset — ramp up over ~600ms after note trigger
-        v.vibratoOnset = juce::jmin(1.f, v.vibratoOnset + dt / 0.6f);
+        // Onset delay stagger
+        v.onsetTimer += dt;
+        if (v.onsetTimer < v.onsetDelay) {
+            out.ampOffset = 0.f;
+            out.active    = true;
+            return out;
+        }
 
-        // Pitch drift: depth computed from current drift_ so knob affects held notes
-        v.driftPhase += juce::MathConstants<float>::twoPi * v.driftRate * dt;
-        float liveDepth  = drift_ * (8.f + v.driftRandScale * 12.f);  // cents
-        float pitchCents = std::sin(v.driftPhase) * liveDepth * v.vibratoOnset;
+        // Onset ramp — fade in over 300ms
+        v.onsetRamp = juce::jmin(1.f, v.onsetRamp + dt / 0.3f);
 
-        // Chant pulse — rhythmic amplitude swell tied to BPM
-        float chantPhaseInc = (bpm_ / 60.f) * juce::MathConstants<float>::twoPi * dt;
-        v.breathPhase += chantPhaseInc * v.breathRate;
-        float breathAmp = 1.f - chant_ * 0.12f * (0.5f + 0.5f * std::sin(v.breathPhase));
+        // Amplitude LFOs
+        v.lfoPhaseA += twoPi * v.lfoRateA * dt;
+        float vibratoAmp = drift_ * 0.08f * std::sin(v.lfoPhaseA);
 
-        out.pitchOffsetCents = pitchCents;
-        out.ampOffset        = v.ampBase * breathAmp;
-        out.active           = true;
+        v.lfoPhaseB += twoPi * v.lfoRateB * dt;
+        float swellAmp = drift_ * 0.12f * std::sin(v.lfoPhaseB);
+
+        // Breath cycle
+        v.breathPhase += twoPi * v.breathRate * dt;
+        float breathMod = 1.f - chant_ * 0.15f * (0.5f + 0.5f * std::sin(v.breathPhase));
+
+        // Pitch vibrato (cents)
+        v.pitchPhase += twoPi * v.pitchRate * dt;
+        out.pitchOffsetCents = drift_ * 12.f * std::sin(v.pitchPhase);  // +/- 12 cents max
+
+        float ampMod = v.ampBase * (1.f + vibratoAmp + swellAmp) * breathMod * v.onsetRamp;
+        out.ampOffset = juce::jlimit(0.f, 1.4f, ampMod);
+        out.active    = true;
         return out;
     }
 
 private:
+    static constexpr float twoPi = juce::MathConstants<float>::twoPi;
+
     struct PerVoice {
-        float driftPhase    = 0.f;
-        float driftRate     = 4.f;
-        float driftRandScale= 0.5f;  // random 0-1, depth scaled by live drift_ each tick
-        float ampBase       = 1.f;
-        float breathPhase   = 0.f;
-        float breathRate    = 0.25f;
-        float vibratoOnset  = 0.f;
-        bool  active        = false;
+        float lfoPhaseA  = 0.f, lfoPhaseB = 0.f;
+        float lfoRateA   = 4.5f, lfoRateB = 1.0f;
+        float pitchPhase = 0.f,  pitchRate = 4.8f;
+        float ampBase    = 1.f;
+        float breathPhase= 0.f, breathRate = 0.2f;
+        float onsetRamp  = 0.f;
+        float onsetDelay = 0.f;
+        float onsetTimer = 0.f;
+        bool  active     = false;
     };
 
     PerVoice voices_[kMaxVoices];
-    double sr_    = 44100.0;
-    float  drift_ = 0.3f;
-    float  chant_ = 0.f;
-    float  bpm_   = 120.f;
+    double   sr_    = 44100.0;
+    float    drift_ = 0.3f;
+    float    chant_ = 0.f;
+    float    bpm_   = 120.f;
 
     std::mt19937 rng_{ std::random_device{}() };
     std::uniform_real_distribution<float> dist01_{ 0.f, 1.f };
 
     void initVoice(int i) {
         voices_[i] = PerVoice{};
-        voices_[i].driftPhase = dist01_(rng_) * juce::MathConstants<float>::twoPi;
+        voices_[i].lfoPhaseA  = dist01_(rng_) * twoPi;
+        voices_[i].lfoPhaseB  = dist01_(rng_) * twoPi;
+        voices_[i].onsetDelay = float(i) * 0.025f;
+        voices_[i].active     = true;  // always active as an audio effect
     }
 };

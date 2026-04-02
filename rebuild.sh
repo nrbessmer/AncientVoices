@@ -15,6 +15,9 @@
 
 set -euo pipefail
 
+# Request sudo upfront so the system Components copy doesn't prompt mid-build
+sudo -v
+
 # ── Fixed project root ─────────────────────────────────────────────────────────
 PROJECT="/Volumes/Rocket_XTRM/Projects/AncientVoices"
 BUILD_DIR="$PROJECT/build"
@@ -22,9 +25,9 @@ BUILD_DIR="$PROJECT/build"
 # ── Plugin identity ────────────────────────────────────────────────────────────
 PLUGIN_NAME="Ancient Voices"
 PRODUCT_NAME="AncientVoices"
-MANUFACTURER_CODE="Tuly"
-PLUGIN_CODE="AVoc"
-AU_TYPE="aumu"
+MANUFACTURER_CODE="Tull"
+PLUGIN_CODE="AV05"
+AU_TYPE="aufx"    # audio effect
 
 # ── Install destinations ───────────────────────────────────────────────────────
 AU_INSTALL="$HOME/Library/Audio/Plug-Ins/Components/${PLUGIN_NAME}.component"
@@ -122,6 +125,9 @@ if [[ $INSTALL -eq 1 ]]; then
         rm -rf "$AU_INSTALL"
         cp -r "$AU_BUILD" "$AU_INSTALL"
         ok "AU   → $AU_INSTALL"
+        sudo rm -rf "/Library/Audio/Plug-Ins/Components/${PLUGIN_NAME}.component"
+        sudo cp -r "$AU_BUILD" "/Library/Audio/Plug-Ins/Components/${PLUGIN_NAME}.component"
+        ok "AU   → /Library/Audio/Plug-Ins/Components/${PLUGIN_NAME}.component"
     else
         warn "AU bundle not found — did the compile succeed?"
     fi

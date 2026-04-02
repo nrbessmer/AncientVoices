@@ -21,38 +21,38 @@ struct FormantPoint {
 // ── SUMERIAN — open, chest-resonant, ritual drone quality ────────────────────
 static constexpr std::array<FormantPoint,5> kSumerianVowels = {{
     // A          E          I          O          U
-    {730,1090,2440,3400,  80,70,160,300},   // A — wide open
-    {530, 980,2480,3500,  60,80,170,280},   // E — forward
-    {270,2290,3010,3500,  50,90,160,270},   // I — bright narrow
-    {570, 840,2410,3400,  70,80,170,290},   // O — rounded
-    {300, 870,2240,3200,  60,70,160,280},   // U — dark rounded
+    {730,1090,2440,3400,  160,140,320,600},   // A — wide open
+    {530, 980,2480,3500,  120,160,340,560},   // E — forward
+    {270,2290,3010,3500,  100,180,320,540},   // I — bright narrow
+    {570, 840,2410,3400,  140,160,340,580},   // O — rounded
+    {300, 870,2240,3200,  120,140,320,560},   // U — dark rounded
 }};
 
 // ── EGYPTIAN — nasal, forward placement, ceremonial brightness ───────────────
 static constexpr std::array<FormantPoint,5> kEgyptianVowels = {{
-    {760,1180,2500,3500,  90,75,180,310},   // A — bright open
-    {560,1050,2530,3550,  70,85,185,295},   // E — nasal forward
-    {290,2350,3080,3580,  55,95,175,280},   // I — very bright
-    {600, 900,2450,3450,  80,85,180,300},   // O — nasal rounded
-    {330, 940,2300,3250,  65,75,165,285},   // U — dark nasal
+    {760,1180,2500,3500,  180,150,360,620},   // A — bright open
+    {560,1050,2530,3550,  140,170,370,590},   // E — nasal forward
+    {290,2350,3080,3580,  110,190,350,560},   // I — very bright
+    {600, 900,2450,3450,  160,170,360,600},   // O — nasal rounded
+    {330, 940,2300,3250,  130,150,330,570},   // U — dark nasal
 }};
 
 // ── BYZANTINE — choral, chest-mixed, liturgical warmth ──────────────────────
 static constexpr std::array<FormantPoint,5> kByzantineVowels = {{
-    {700,1060,2400,3350,  75,65,155,285},   // A — warm chest
-    {510, 960,2460,3450,  55,75,165,270},   // E — liturgical clear
-    {255,2260,2980,3470,  45,85,155,260},   // I — piercing choir
-    {550, 820,2380,3380,  65,75,165,280},   // O — warm rounded
-    {285, 850,2210,3180,  55,65,155,270},   // U — deep covered
+    {700,1060,2400,3350,  150,130,310,570},   // A — warm chest
+    {510, 960,2460,3450,  110,150,330,540},   // E — liturgical clear
+    {255,2260,2980,3470,   90,170,310,520},   // I — piercing choir
+    {550, 820,2380,3380,  130,150,330,560},   // O — warm rounded
+    {285, 850,2210,3180,  110,130,310,540},   // U — deep covered
 }};
 
 // ── VEDIC — chant, throat resonance, overtone emphasis ──────────────────────
 static constexpr std::array<FormantPoint,5> kVedicVowels = {{
-    {750,1120,2460,3420,  85,72,162,295},   // A — open Sanskrit a
-    {545,1000,2500,3520,  62,82,172,282},   // E — Sanskrit e
-    {280,2310,3020,3510,  52,92,162,272},   // I — Sanskrit i
-    {585, 860,2420,3410,  72,82,172,285},   // O — Sanskrit o
-    {315, 890,2260,3210,  60,72,160,275},   // U — Sanskrit u
+    {750,1120,2460,3420,  170,144,324,590},   // A — open Sanskrit a
+    {545,1000,2500,3520,  124,164,344,564},   // E — Sanskrit e
+    {280,2310,3020,3510,  104,184,324,544},   // I — Sanskrit i
+    {585, 860,2420,3410,  144,164,344,570},   // O — Sanskrit o
+    {315, 890,2260,3210,  120,144,320,550},   // U — Sanskrit u
 }};
 
 // ── ACCESSOR ─────────────────────────────────────────────────────────────────
@@ -64,8 +64,10 @@ inline const FormantPoint& getFormant(AncientEra era, int vowelIdx)
         case AncientEra::Egyptian:  return kEgyptianVowels [size_t(vowelIdx)];
         case AncientEra::Byzantine: return kByzantineVowels[size_t(vowelIdx)];
         case AncientEra::Vedic:     return kVedicVowels    [size_t(vowelIdx)];
-        default:                    return kSumerianVowels [size_t(vowelIdx)];
+        case AncientEra::COUNT:     break;
+        default:                    break;
     }
+    return kSumerianVowels[size_t(vowelIdx)];
 }
 
 // Interpolate between two adjacent vowel positions (0.0–4.0)

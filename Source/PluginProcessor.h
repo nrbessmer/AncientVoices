@@ -1,69 +1,33 @@
 #pragma once
 #include <JuceHeader.h>
 #include <atomic>
+#include <random>
 #include <rubberband/RubberBandStretcher.h>
+#include "AncientVoicesConfig.h"
 #include "DSP/FormantFilter.h"
+#include "DSP/CaveReverb.h"
 #include "DSP/HumanizeEngine.h"
-#include "DSP/PitchTracker.h"
-#include "DSP/PitchQuantizer.h"
+#include "Data/IntervalTables.h"
 #include "Data/Presets.h"
 
-// =============================================================================
-//  ANCIENT VOICES  v3  —  Stereo vocal transformation effect
+// ═══════════════════════════════════════════════════════════════════
+//  ANCIENT VOICES — DBTF Behavioral Contract
 //
-//  WHAT CHANGED FROM v2 (and why v2 had distortion + broken rendering):
+//  MUST:   mix=1.0 → zero dry in output
+//  MUST:   mix=0.0 → output identical to input
+//  MUST:   wet level within 6 dB of dry at depth=1.0
+//  MUST:   no heap allocation in processBlock
+//  NEVER:  add x (dry) inside FormantFilter::tick()
+//  NEVER:  run shimmer/reverb before wet path is isolated
 //
-//  1. CaveReverb (custom Schroeder) -> juce::dsp::Reverb
-//     Reason: feedback 0.98 at size=1.0 caused near-instability; JUCE reverb
-//     is tuned and battle-tested.
-//
-//  2. SaturationStage (custom) -> juce::dsp::WaveShaper<float> (tanh)
-//     Reason: SaturationStage::tick() added the dry signal TWICE — the last
-//     line was: return saturated + x*(1-drive*0.7f) + x*(1-drive*0.3f)
-//     Output exceeded 1.0 even with drive=0. This was the primary distortion.
-//
-//  3. VocalChorus (custom) -> juce::dsp::Chorus<float>
-//     Reason: custom chorus set filter coefficients every sample inside
-//     the per-copy loop — O(N*blockSize) coefficient recalculation.
-//
-//  4. FormantShimmer (custom granular) -> RubberBand pitch shift
-//     Reason: shimmer feedback buffer had no gain ceiling — compounded
-//     every sample, adding to clipping. RubberBand is used exactly as
-//     MisterMultiVox uses it for harmonization: proven, stable, real-time.
-//
-//  5. FormantFilter gain: *1.5f -> *2.2f (calibrated)
-//     Reason: 1.5f * 8 copies * sqrt(8) normalisation still exceeded 1.0.
-//     2.2f compensates for the actual ~0.45 output ratio of 4 SVF bandpass
-//     filters summed with {1.0, 0.75, 0.45, 0.22} gains.
-//
-//  6. HumanizeEngine::triggerVoice() now called in prepareToPlay()
-//     Reason: was never called — all voices had active=false, output was
-//     silence multiplied by zero ampOffset.
-//
-//  7. VoiceHumanization::pitchOffsetCents added
-//     Reason: ChoirVoice referenced hum.pitchOffsetCents but the field
-//     did not exist — compile error in the synthesiser path.
-//
-//  8. Stack VLA float outL[2048] -> heap-allocated workBuf_
-//     Reason: Logic Pro can use blocks > 2048 samples. Stack VLA is
-//     undefined behavior and causes crashes with large buffer sizes.
-//
-//  SIGNAL PATH:
-//    Input (stereo/mono)
-//      -> mono sum
-//      -> N copies (1-8), each:
-//           juce::dsp::Chorus    (per-copy LFO thickness)
-//           FormantFilter SVF    (F1-F4 vowel shaping — the core effect)
-//           HumanizeEngine       (amp drift + pitch vibrato per copy)
-//      -> equal-power stereo pan sum / sqrt(N)
-//      -> juce::dsp::WaveShaper tanh  (soft harmonic warmth)
-//      -> RubberBand shimmer    (octave-up pitch shift, wet/dry blended)
-//      -> juce::dsp::Reverb     (cave/room space)
-//      -> juce::dsp::Limiter    (safety ceiling -1 dBFS)
-//      -> wet/dry blend with original input
-//      -> master vol * gain dB
-//      -> scope capture (lock-free)
-// =============================================================================
+//  Signal chain — dry enters output ONLY at step 11:
+//    1  Save dry          7  Saturation (inline tanh)
+//    2  Mono sum          8  Shimmer (wet only)
+//    3  Breathe noise     9  Cave reverb
+//    4  N×FormantFilter  10  Limiter
+//    5  Wet boost        11  Crossfade: wet×mix + dry×(1-mix)
+//    6  Chorus           12  Scope feed → AbstractFifo (lock-free)
+// ═══════════════════════════════════════════════════════════════════
 
 class AncientVoicesProcessor : public juce::AudioProcessor
 {
@@ -78,13 +42,12 @@ public:
     void processBlock  (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     juce::AudioProcessorEditor* createEditor() override;
-    bool hasEditor() const override { return true; }
-
-    const juce::String getName()  const override;
-    bool   acceptsMidi()  const override;
-    bool   producesMidi() const override;
-    bool   isMidiEffect() const override;
-    double getTailLengthSeconds() const override;
+    bool   hasEditor()    const override { return true; }
+    bool   acceptsMidi()  const override { return false; }
+    bool   producesMidi() const override { return false; }
+    bool   isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 4.0; }
+    const  juce::String getName() const override;
 
     int  getNumPrograms()    override { return presets_.count(); }
     int  getCurrentProgram() override { return presets_.current(); }
@@ -92,96 +55,94 @@ public:
     const juce::String getProgramName(int i) override { return presets_.get(i).name; }
     void changeProgramName(int, const juce::String&) override {}
 
-    void getStateInformation (juce::MemoryBlock& dest) override;
-    void setStateInformation (const void* data, int size) override;
-    bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
+    void getStateInformation(juce::MemoryBlock&) override;
+    void setStateInformation(const void*, int) override;
+    bool isBusesLayoutSupported(const BusesLayout&) const override;
 
     juce::AudioProcessorValueTreeState apvts;
+    AVPresetManager& getPresets() { return presets_; }
 
-    bool consumeScope(juce::AudioBuffer<float>& dest) {
-        const juce::ScopedLock sl(scopeLock_);
-        if (!scopeReady_.load(std::memory_order_relaxed)) return false;
-        scopeReady_.store(false, std::memory_order_relaxed);
-        dest.makeCopyOf(scopeBuf_);
+    // ── Lock-free scope consumer (UI thread only) ──────────────────
+    //  CONTRACT: single consumer. Audio thread writes, UI thread reads.
+    //  No lock. No allocation on the audio thread.
+    //  Returns false when FIFO is empty (no new data this timer tick).
+    bool consumeScope(juce::AudioBuffer<float>& dest)
+    {
+        const int available = scopeFifo_.getNumReady();
+        if (available <= 0) return false;
+
+        dest.setSize(1, available, false, false, true);   // alloc on UI thread only
+        float* d = dest.getWritePointer(0);
+
+        int start1, size1, start2, size2;
+        scopeFifo_.prepareToRead(available, start1, size1, start2, size2);
+        juce::FloatVectorOperations::copy(d,         scopeBuf_ + start1, size1);
+        juce::FloatVectorOperations::copy(d + size1, scopeBuf_ + start2, size2);
+        scopeFifo_.finishedRead(size1 + size2);
         return true;
     }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParams();
 
-    // ── FormantFilter (SVF, fixed gain) ───────────────────────────────────
-    FormantFilter copies_[kMaxCopies];
-    float         copyPan_[kMaxCopies] = {};
-
-    // ── JUCE DSP modules (proven: same pattern as MisterMultiVox) ─────────
-    juce::dsp::Chorus<float>     chorus_;
-    juce::dsp::WaveShaper<float> waveshaper_;
-    juce::dsp::Reverb            reverb_;
-    juce::dsp::Limiter<float>    limiter_;
-    juce::dsp::ProcessSpec       spec_;
-
-    // ── RubberBand shimmer (octave up, same usage as MMV harmonizer) ──────
-    std::unique_ptr<RubberBand::RubberBandStretcher> shimmerRB_;
-    double shimmerLastSR_      = 0.0;
-    int    shimmerLastChannels_ = 0;
-
-    // ── HumanizeEngine (fixed: voices now triggered in prepareToPlay) ──────
+    // ── DSP objects ────────────────────────────────────────────────
+    FormantFilter  copies_[kMaxCopies];
+    float          copyPan_[kMaxCopies]    = {};
+    float          copyDetune_[kMaxCopies] = {};
     HumanizeEngine humanizer_;
+    CaveReverb     reverb_;
+    juce::dsp::Chorus<float>  chorus_;
+    juce::dsp::Limiter<float> limiter_;
+    juce::dsp::ProcessSpec    spec_;
 
-    // ── Pitch tracker ─────────────────────────────────────────────────────
-    PitchTracker   pitchTracker_;
-    PitchQuantizer pitchQuantizer_;
-    int            pitchBlockCounter_ = 0;
-    juce::SmoothedValue<float> trackedPitchSmooth_;
+    // ── Shimmer ────────────────────────────────────────────────────
+    std::unique_ptr<RubberBand::RubberBandStretcher> shimmerRB_;
+    double shimmerLastSR_ = 0.0;
+    int    shimmerLastCh_ = 0;
 
-    // ── Heap work buffers (fixes VLA stack crash with large Logic buffers) ─
-    juce::AudioBuffer<float> workBuf_;    // stereo accumulation for N copies
-    juce::AudioBuffer<float> shimmerBuf_; // RubberBand temp buffer
-    juce::AudioBuffer<float> dryBuf_;     // dry input saved for wet/dry blend
-    int maxBlockSize_ = 0;
+    // ── Work buffers (prepareToPlay only — never in processBlock) ──
+    juce::AudioBuffer<float> dryBuf_, workBuf_, monoInBuf_, shimmerBuf_;
+    int maxBlock_ = 0;
 
-    // ── Parameter cache ───────────────────────────────────────────────────
-    struct ParamCache {
-        float vowelPos     = 0.f;
-        float openness     = 1.f;
-        float gender       = 1.f;
-        float formantShift = 0.f;
-        int   numCopies    = 4;
-        float spread       = 0.6f;
-        float drift        = 0.3f;
-        float chant        = 0.f;
-        float mix          = 0.8f;
-        int   eraIdx       = 0;
-        float snapAmount   = 0.f;
-        int   snapScale    = 0;
-        // Reverb
-        float reverbRoom   = 0.6f;
-        float reverbDamp   = 0.4f;
-        float reverbWet    = 0.3f;
-        float reverbWidth  = 1.0f;
-        // Shimmer (RubberBand)
-        float shimmerMix   = 0.15f;
-        float shimmerAmt   = 0.5f;
-        // Saturation
-        float satDrive     = 0.15f;
-        // Master
-        float masterVol    = 1.0f;
-        float masterGain   = 0.0f;
-    };
-    ParamCache cache_;
+    // ── Param cache ────────────────────────────────────────────────
+    struct Cache {
+        float vowelPos=0, openness=1, gender=1, formantShift=0, formantDepth=0.8f;
+        float spread=0.6f, drift=0.6f, breathe=0.1f, roughness=0.05f;
+        int   era=0, numCopies=2, interval=0, voiceMode=0;
+        float mix=1, caveMix=0.6f, caveSize=0.85f, caveDamp=0.4f, caveEcho=20;
+        float shimmerMix=0, shimmerAmt=0.5f;
+        float masterVol=1, masterGain=0;
+        float satDrive=0.1f;
+        float effDepth=0.8f, effBwMul=1.f, effChoMix=0.35f;
+        float effSat=0.1f,   effShimmer=0.f;
+    } cache_;
 
-    void updateCacheFromApvts();
-    void updateModules();
-    void initShimmerRB(double sampleRate, int numChannels);
-    void applyShimmer(juce::AudioBuffer<float>& buffer);
+    // ── Breath noise ───────────────────────────────────────────────
+    std::mt19937  rng_{ 42 };
+    std::uniform_real_distribution<float> dist_{ -1.f, 1.f };
+    float breatheState_ = 0.f;
 
-    double sr_ = 44100.0;
+    // ── Param throttle ─────────────────────────────────────────────
+    int  paramCounter_ = 0;
+    std::atomic<bool> stateRestorePending_{ false };
+
+    // ── Lock-free scope FIFO ───────────────────────────────────────
+    //  Pattern mirrors MisterMultiVox's harmonizerFifo — brace-init
+    //  with size, separate plain-float backing array alongside.
+    //  Audio thread writes via prepareToWrite/finishedWrite.
+    //  UI thread reads via prepareToRead/finishedRead.
+    //  No mutex. No atomic flag. No allocation on audio thread.
+    static constexpr int kScopeFifoSize = 8192;
+    juce::AbstractFifo   scopeFifo_{ kScopeFifoSize };
+    float                scopeBuf_[kScopeFifoSize] = {};
 
     AVPresetManager presets_;
+    double sr_ = 44100.0;
 
-    juce::AudioBuffer<float> scopeBuf_;
-    juce::CriticalSection    scopeLock_;
-    std::atomic<bool>        scopeReady_ { false };
+    void updateCache();
+    void updateModules();
+    void initShimmer(double sr, int ch);
+    void applyShimmer(juce::AudioBuffer<float>&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AncientVoicesProcessor)
 };

@@ -10,26 +10,34 @@ if(NOT CMAKE_OSX_ARCHITECTURES)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures" FORCE)
 endif()
 
+# ── Disable Xcode automatic code signing ─────────────────────────────────────
+# Prevents "No signing certificate Mac Development found" error when the
+# build machine does not have a Mac Development certificate in its keychain.
+# Ad-hoc signing is sufficient for local AU/VST3 development and matches
+# how MisterMultiVox is built via Projucer without explicit signing config.
+set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "-")
+set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO")
+set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO")
+
 # ── RubberBand ────────────────────────────────────────────────────────────────
-find_path(RUBBERBAND_INCLUDE_DIR
-    NAMES rubberband/RubberBandStretcher.h
-    PATHS
-        /opt/homebrew/include
-        /opt/homebrew/opt/rubberband/include
-        /usr/local/include
-        /usr/local/opt/rubberband/include
-    REQUIRED
-)
-find_library(RUBBERBAND_LIBRARY
-    NAMES rubberband
-    PATHS
-        /opt/homebrew/lib
-        /opt/homebrew/opt/rubberband/lib
-        /usr/local/lib
-        /usr/local/opt/rubberband/lib
-    REQUIRED
-)
-message(STATUS "RubberBand: ${RUBBERBAND_INCLUDE_DIR} / ${RUBBERBAND_LIBRARY}")
+if(EXISTS "/opt/homebrew/lib/librubberband.dylib")
+    set(RUBBERBAND_INCLUDE_DIR "/opt/homebrew/include")
+    set(RUBBERBAND_LIBRARY     "/opt/homebrew/lib/librubberband.dylib")
+elseif(EXISTS "/opt/homebrew/lib/librubberband.a")
+    set(RUBBERBAND_INCLUDE_DIR "/opt/homebrew/include")
+    set(RUBBERBAND_LIBRARY     "/opt/homebrew/lib/librubberband.a")
+elseif(EXISTS "/usr/local/lib/librubberband.dylib")
+    set(RUBBERBAND_INCLUDE_DIR "/usr/local/include")
+    set(RUBBERBAND_LIBRARY     "/usr/local/lib/librubberband.dylib")
+elseif(EXISTS "/usr/local/lib/librubberband.a")
+    set(RUBBERBAND_INCLUDE_DIR "/usr/local/include")
+    set(RUBBERBAND_LIBRARY     "/usr/local/lib/librubberband.a")
+else()
+    message(FATAL_ERROR "RubberBand not found. Fix: brew install rubberband")
+endif()
+
+message(STATUS "RubberBand include: ${RUBBERBAND_INCLUDE_DIR}")
+message(STATUS "RubberBand library: ${RUBBERBAND_LIBRARY}")
 
 # ── JUCE ──────────────────────────────────────────────────────────────────────
 add_subdirectory(JUCE)
@@ -48,8 +56,13 @@ juce_add_plugin(AncientVoices
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     VST3_CATEGORIES             "Fx"
     AU_MAIN_TYPE                kAudioUnitType_Effect
-    HARDENED_RUNTIME_ENABLED    TRUE
-    AU_SANDBOX_SAFE             TRUE
+    # Prevents JUCE from injecting network.client and
+    # temporary-exception.files.all.read-write into the Info.plist
+    # resourceUsage block. Logic Pro's sandbox host blocks any AU
+    # that declares those exceptions and shows a black window instead
+    # of loading the custom Cocoa UI.
+    NEEDS_CURL                  FALSE
+    NEEDS_WEB_BROWSER           FALSE
 )
 
 juce_generate_juce_header(AncientVoices)
@@ -65,13 +78,11 @@ target_include_directories(AncientVoices PRIVATE
 )
 
 target_compile_definitions(AncientVoices PUBLIC
+    JUCE_STRICT_REFCOUNTEDPOINTER=1
+    JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
-    # These define the AUCocoaViewClass name — without them Logic shows generic window
-    JucePlugin_ManufacturerCode=0x54756c6c
-    JucePlugin_PluginCode=0x41563035
 )
 
 target_compile_options(AncientVoices PRIVATE
@@ -84,15 +95,6 @@ target_compile_options(AncientVoices PRIVATE
     -Wno-unused-parameter
     -Wno-pedantic
     -Wno-deprecated
-)
-
-# ── Code signing ─────────────────────────────────────────────────────────────
-set_target_properties(AncientVoices PROPERTIES
-    XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
-    XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "YES"
-    XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "YES"
-    XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "33N7S7V79Y"
-    XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
 )
 
 target_link_libraries(AncientVoices

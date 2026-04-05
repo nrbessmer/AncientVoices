@@ -2,52 +2,51 @@
 #include <JuceHeader.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PALETTE  — White on Deep Blue theme
+//  PALETTE  — Near-black warm background, amber accent
 //
-//  Background hierarchy:
-//    Base     #1A2744  — deep navy blue (main background)
-//    Surface  #1E3054  — slightly lighter navy (panels)
-//    Raised   #253B66  — control backgrounds
-//    Lift     #2E4878  — hover state
+//  Background hierarchy (warm near-black — Baby Audio / Valhalla register):
+//    Base     #0C0E12  — near-black, slight cool depth
+//    Surface  #131720  — panel interiors
+//    Raised   #1C2230  — control backgrounds
+//    Lift     #242D3E  — hover state
 //
-//  Accent: Gold / Amber — warm contrast against blue
-//    Primary  #E8B84B  — main accent (knob arcs, selection, active)
-//    Bright   #F5D07A  — highlights
-//    Dim      #8A6820  — inactive arc tracks
+//  Accent: warm amber (less yellow, more burnt-orange than v2 gold)
+//    Primary  #D4883A  — main accent (knob arcs, active state)
+//    Bright   #ECA855  — highlights
+//    Dim      #7A4E20  — inactive arc tracks
+//    Track    #1C2230  — knob track groove
 //
-//  Text: White for maximum legibility on dark blue
-//    High     #FFFFFF  — primary text, full white
-//    Mid      #B8C8E8  — labels, secondary (light blue-white)
-//    Low      #6A82A8  — hints, disabled
+//  Text: warm off-white (not pure #FFFFFF — sits easier on dark bg)
+//    High     #EAE6E0  — primary text
+//    Mid      #8892A4  — labels, secondary
+//    Low      #4A5264  — hints, disabled
 //
-//  Secondary accents:
-//    Cyan     #4EC9E8  — scope, live data
-//    Coral    #FF7B6B  — warnings
-//    Gold     #E8B84B  — shimmer, special
-//    Mint     #5DC8A0  — choir section
+//  Secondary accents (same roles, warmer tones):
+//    Cyan     #3EC4D8
+//    Coral    #E86A5A
+//    Gold     #D4883A  (aliases Primary)
+//    Mint     #4DC49A
+//    Purple   #9B7FD4
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Pal {
     inline constexpr juce::uint32
-        cBase    = 0xFF1A2744,   // deep navy
-        cSurface = 0xFF1E3054,   // lighter navy
-        cRaised  = 0xFF253B66,   // control bg
-        cLift    = 0xFF2E4878,   // hover
-        cBorder  = 0xFF3A5488,   // borders
-        cBorderHi= 0xFF4E6EA8,   // active border
-        // Accent — gold on blue
-        cPrimary = 0xFFE8B84B,   // gold
-        cBright  = 0xFFF5D07A,   // bright gold
-        cDim     = 0xFF8A6820,   // dim gold
-        cTrack   = 0xFF2A3E6A,   // knob track
-        // Text — white on blue
-        cHigh    = 0xFFFFFFFF,   // pure white
-        cMid     = 0xFFB8C8E8,   // light blue-white
-        cLow     = 0xFF6A82A8,   // muted blue
-        // Secondary
-        cCyan    = 0xFF4EC9E8,   // cyan
-        cCoral   = 0xFFFF7B6B,   // coral
-        cGold    = 0xFFE8B84B,   // gold
-        cMint    = 0xFF5DC8A0;   // mint
+        cBase    = 0xFF0C0E12,
+        cSurface = 0xFF131720,
+        cRaised  = 0xFF1C2230,
+        cLift    = 0xFF242D3E,
+        cBorder  = 0xFF2A3448,
+        cBorderHi= 0xFF3E5070,
+        cPrimary = 0xFFD4883A,
+        cBright  = 0xFFECA855,
+        cDim     = 0xFF7A4E20,
+        cTrack   = 0xFF1C2230,
+        cHigh    = 0xFFEAE6E0,
+        cMid     = 0xFF8892A4,
+        cLow     = 0xFF4A5264,
+        cCyan    = 0xFF3EC4D8,
+        cCoral   = 0xFFE86A5A,
+        cGold    = 0xFFD4883A,
+        cMint    = 0xFF4DC49A;
 
     const juce::Colour
         Base    {cBase},    Surface  {cSurface}, Raised   {cRaised},
@@ -63,9 +62,9 @@ namespace Pal {
         TextDim   = Mid,
         TextFaint = Low,
         Amber     = Gold,
-        AmberDim  {0xFF8A6820},
+        AmberDim  {cDim},
         Sage      = Mint,
-        Purple    {0xFFAA88EE},
+        Purple    {0xFF9B7FD4u},
         Teal      = Cyan,
         Crimson   = Coral,
         Vocal     = Primary,
@@ -89,7 +88,11 @@ namespace Fonts {
                    .withStyle(style).withHeight(size));
     }
     inline juce::Font body   (float s = 13.f)  { return sysFont(s, false); }
-    inline juce::Font label  (float s = 10.5f) { auto f = sysFont(s, false); f.setExtraKerningFactor(0.06f); return f; }
+    inline juce::Font label  (float s = 10.5f) {
+        auto f = sysFont(s, false);
+        f.setExtraKerningFactor(0.07f);   // slightly tighter than v2 (0.06)
+        return f;
+    }
     inline juce::Font display(float s = 16.f)  { return sysFont(s, true); }
     inline juce::Font mono   (float s = 11.f)  {
         return juce::Font(juce::FontOptions()
@@ -98,7 +101,7 @@ namespace Fonts {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  LOOK AND FEEL  — White on Blue
+//  LOOK AND FEEL
 // ─────────────────────────────────────────────────────────────────────────────
 class AncientLAF : public juce::LookAndFeel_V4 {
 public:
@@ -114,12 +117,12 @@ public:
         // PopupMenu
         setColour(juce::PopupMenu::backgroundColourId,            Pal::Raised);
         setColour(juce::PopupMenu::textColourId,                  Pal::High);
-        setColour(juce::PopupMenu::highlightedBackgroundColourId, Pal::Primary.withAlpha(0.3f));
+        setColour(juce::PopupMenu::highlightedBackgroundColourId, Pal::Primary.withAlpha(0.25f));
         setColour(juce::PopupMenu::highlightedTextColourId,       Pal::High);
 
         // Buttons
         setColour(juce::TextButton::buttonColourId,   Pal::Raised);
-        setColour(juce::TextButton::buttonOnColourId, Pal::Primary.withAlpha(0.3f));
+        setColour(juce::TextButton::buttonOnColourId, Pal::Primary.withAlpha(0.25f));
         setColour(juce::TextButton::textColourOffId,  Pal::Mid);
         setColour(juce::TextButton::textColourOnId,   Pal::High);
 
@@ -132,7 +135,6 @@ public:
 
         // TreeView
         setColour(juce::ListBox::backgroundColourId,  Pal::Surface);
-        setColour(juce::ListBox::outlineColourId,     Pal::Border);
         setColour(juce::TreeView::backgroundColourId, Pal::Surface);
         setColour(juce::TreeView::linesColourId,      Pal::Border);
 
@@ -144,65 +146,73 @@ public:
         setColour(juce::ToggleButton::textColourId, Pal::Mid);
     }
 
-    // ── Rotary knob — gold arc on blue ────────────────────────────────────
+    // ── Rotary knob ───────────────────────────────────────────────────────
+    //  Baby Audio character: thick arc, clear pointer dot, matte disc.
+    //  Arc stroke 4.5 px (was 3 px in v2) — legible at small sizes.
     void drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
                           float pos, float startA, float endA, juce::Slider& s) override
     {
-        float cx = x + w * .5f, cy = y + h * .5f;
-        float r  = std::min(w, h) * .40f;
-        float ri = r * .68f;
-        auto  pi = juce::MathConstants<float>::pi;
+        const float cx  = x + w * 0.5f;
+        const float cy  = y + h * 0.5f;
+        const float r   = std::min(w, h) * 0.42f;   // slightly larger than v2 (0.40)
+        const float ri  = r * 0.66f;
+        const float pi  = juce::MathConstants<float>::pi;
 
-        // Background disc — slightly lighter blue
+        // Matte disc — one-tone fill, no gradient (Baby Audio is flat, not shiny)
         g.setColour(Pal::Raised);
         g.fillEllipse(cx - ri, cy - ri, ri * 2.f, ri * 2.f);
 
-        // Track arc (full range, dim)
+        // Very subtle inner shadow ring
+        g.setColour(Pal::Base.withAlpha(0.6f));
+        g.drawEllipse(cx - ri, cy - ri, ri * 2.f, ri * 2.f, 1.5f);
+
+        // Track arc (full range, very dim — just a groove)
         {
             juce::Path track;
             track.addCentredArc(cx, cy, r, r, 0, startA, endA, true);
-            g.setColour(Pal::Track);
-            g.strokePath(track, juce::PathStrokeType(3.f, juce::PathStrokeType::curved,
-                                                          juce::PathStrokeType::rounded));
+            g.setColour(Pal::Track.brighter(0.15f));
+            g.strokePath(track, juce::PathStrokeType(4.5f,
+                juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
 
-        // Value arc — gold
+        // Value arc — warm amber, thick and clear
         if (pos > 0.001f) {
             juce::Path arc;
-            arc.addCentredArc(cx, cy, r, r, 0, startA, startA + pos * (endA - startA), true);
+            arc.addCentredArc(cx, cy, r, r, 0, startA,
+                              startA + pos * (endA - startA), true);
             auto ac = s.findColour(juce::Slider::rotarySliderFillColourId);
             g.setColour(ac.isOpaque() ? ac : Pal::Primary);
-            g.strokePath(arc, juce::PathStrokeType(3.f, juce::PathStrokeType::curved,
-                                                        juce::PathStrokeType::rounded));
+            g.strokePath(arc, juce::PathStrokeType(4.5f,
+                juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
 
-        // Disc border — subtle blue-white
-        g.setColour(Pal::Border);
-        g.drawEllipse(cx - ri, cy - ri, ri * 2.f, ri * 2.f, 1.f);
-
-        // Pointer line — gold
-        float va  = startA + pos * (endA - startA);
-        float px  = cx + (ri * .58f) * std::cos(va - pi * .5f);
-        float py  = cy + (ri * .58f) * std::sin(va - pi * .5f);
-        float px0 = cx + (ri * .15f) * std::cos(va - pi * .5f);
-        float py0 = cy + (ri * .15f) * std::sin(va - pi * .5f);
-        auto ac = s.findColour(juce::Slider::rotarySliderFillColourId);
-        g.setColour(ac.isOpaque() ? ac : Pal::Primary);
-        g.drawLine(px0, py0, px, py, 2.f);
-        g.fillEllipse(px - 2.5f, py - 2.5f, 5.f, 5.f);
+        // Pointer — short line + filled dot, accent colour
+        {
+            const float va  = startA + pos * (endA - startA);
+            const float cos_ = std::cos(va - pi * 0.5f);
+            const float sin_ = std::sin(va - pi * 0.5f);
+            const float px  = cx + ri * 0.60f * cos_;
+            const float py  = cy + ri * 0.60f * sin_;
+            const float px0 = cx + ri * 0.18f * cos_;
+            const float py0 = cy + ri * 0.18f * sin_;
+            auto ac = s.findColour(juce::Slider::rotarySliderFillColourId);
+            g.setColour(ac.isOpaque() ? ac : Pal::Primary);
+            g.drawLine(px0, py0, px, py, 2.2f);
+            g.fillEllipse(px - 3.f, py - 3.f, 6.f, 6.f);
+        }
     }
 
     // ── ComboBox ──────────────────────────────────────────────────────────
     void drawComboBox(juce::Graphics& g, int w, int h, bool,
                       int, int, int, int, juce::ComboBox& cb) override
     {
-        bool hov = cb.isMouseOver();
+        const bool hov = cb.isMouseOver();
         g.setColour(hov ? Pal::Lift : Pal::Raised);
-        g.fillRoundedRectangle(0, 0, w, h, 5.f);
-        g.setColour(hov ? Pal::Primary : Pal::Border);
-        g.drawRoundedRectangle(.5f, .5f, w - 1.f, h - 1.f, 5.f, 1.f);
+        g.fillRoundedRectangle(0, 0, w, h, 4.f);
+        g.setColour(hov ? Pal::Primary.withAlpha(0.7f) : Pal::Border);
+        g.drawRoundedRectangle(0.5f, 0.5f, w - 1.f, h - 1.f, 4.f, 1.f);
 
-        float ax = w - 14.f, ay = h * .5f;
+        float ax = w - 14.f, ay = h * 0.5f;
         juce::Path arr;
         arr.addTriangle(ax, ay - 2.5f, ax + 7.f, ay - 2.5f, ax + 3.5f, ay + 2.5f);
         g.setColour(Pal::Primary);
@@ -216,29 +226,32 @@ public:
     {
         auto r = b.getLocalBounds().toFloat();
         juce::Colour fill;
-        if      (b.getToggleState()) fill = Pal::Primary.withAlpha(0.25f);
-        else if (dn)                 fill = Pal::Raised.darker(.15f);
+        if      (b.getToggleState()) fill = Pal::Primary.withAlpha(0.22f);
+        else if (dn)                 fill = Pal::Raised.darker(0.1f);
         else if (hov)                fill = Pal::Lift;
         else                         fill = Pal::Raised;
         g.setColour(fill);
-        g.fillRoundedRectangle(r, 5.f);
-        g.setColour(b.getToggleState() ? Pal::Primary : hov ? Pal::Primary.withAlpha(0.5f) : Pal::Border);
-        g.drawRoundedRectangle(r.reduced(.5f), 5.f, 1.f);
+        g.fillRoundedRectangle(r, 4.f);
+        g.setColour(b.getToggleState() ? Pal::Primary
+                    : hov ? Pal::Primary.withAlpha(0.45f) : Pal::Border);
+        g.drawRoundedRectangle(r.reduced(0.5f), 4.f, 1.f);
     }
     juce::Font getTextButtonFont(juce::TextButton&, int) override { return Fonts::label(11.f); }
 
     void drawButtonText(juce::Graphics& g, juce::TextButton& btn, bool, bool) override
     {
-        auto r      = btn.getLocalBounds().toFloat();
-        bool active = btn.getToggleState();
-        bool hov    = btn.isMouseOver();
+        const auto  r      = btn.getLocalBounds().toFloat();
+        const bool  active = btn.getToggleState();
+        const bool  hov    = btn.isMouseOver();
         g.setColour(active ? Pal::Primary : hov ? Pal::High : Pal::Mid);
         g.setFont(Fonts::label(11.f));
         g.drawText(btn.getButtonText(), r.toNearestInt(), juce::Justification::centred);
         if (active) {
             g.setColour(Pal::Primary);
-            g.fillRect(r.removeFromBottom(2.f));
+            // Compute bottom strip without mutating r (r is const)
+            g.fillRect(juce::Rectangle<float>(r.getX(), r.getBottom() - 2.f, r.getWidth(), 2.f));
         }
+        // Vertical separator between adjacent buttons
         g.setColour(Pal::Border);
         g.drawLine(r.getRight(), r.getY() + 4.f, r.getRight(), r.getBottom() - 4.f, 1.f);
     }
@@ -246,22 +259,22 @@ public:
     // ── Tab bar ───────────────────────────────────────────────────────────
     void drawTabButton(juce::TabBarButton& btn, juce::Graphics& g, bool active, bool hov) override
     {
-        auto r = btn.getActiveArea().toFloat();
+        const auto r = btn.getActiveArea().toFloat();
         g.setColour(active ? Pal::Surface : hov ? Pal::Lift : Pal::Base);
         g.fillRect(r);
-        g.setColour(active ? Pal::High : hov ? Pal::Mid.brighter(.1f) : Pal::Low);
+        g.setColour(active ? Pal::High : hov ? Pal::Mid.brighter(0.1f) : Pal::Low);
         g.setFont(Fonts::label(11.f));
         g.drawText(btn.getButtonText(), r.toNearestInt(), juce::Justification::centred);
         if (active) {
             g.setColour(Pal::Primary);
-            g.fillRect(r.removeFromBottom(2.f));
+            g.fillRect(juce::Rectangle<float>(r.getX(), r.getBottom() - 2.f, r.getWidth(), 2.f));
         }
         g.setColour(Pal::Border);
         g.drawLine(r.getRight(), r.getY() + 4.f, r.getRight(), r.getBottom() - 4.f, 1.f);
     }
 
     // ── Scrollbar ─────────────────────────────────────────────────────────
-    void drawScrollbar(juce::Graphics& g, juce::ScrollBar& /*bar*/, int x, int y,
+    void drawScrollbar(juce::Graphics& g, juce::ScrollBar&, int x, int y,
                        int w, int h, bool vert, int tp, int ts, bool hov, bool dn) override
     {
         g.setColour(Pal::Base);
@@ -276,7 +289,7 @@ public:
         g.fillRoundedRectangle(thumb, 3.f);
     }
 
-    // ── Static panel helpers ──────────────────────────────────────────────
+    // ── Panel helpers ─────────────────────────────────────────────────────
     static void bg(juce::Graphics& g, juce::Rectangle<int> b) {
         g.setColour(Pal::Base);
         g.fillRect(b);
@@ -284,20 +297,24 @@ public:
 
     static void panel(juce::Graphics& g, juce::Rectangle<float> b) {
         g.setColour(Pal::Surface);
-        g.fillRoundedRectangle(b, 6.f);
+        g.fillRoundedRectangle(b, 5.f);
         g.setColour(Pal::Border);
-        g.drawRoundedRectangle(b.reduced(.5f), 6.f, 1.f);
+        g.drawRoundedRectangle(b.reduced(0.5f), 5.f, 1.f);
     }
 
+    // Section label: amber text + 1 px separator line beneath
     static void sectionLabel(juce::Graphics& g, juce::Rectangle<int> b, const juce::String& t) {
         g.setFont(Fonts::label(9.5f));
-        g.setColour(Pal::Primary);   // gold section labels on blue background
+        g.setColour(Pal::Primary);
         g.drawText(t.toUpperCase(), b, juce::Justification::centredLeft);
+        // 1 px rule under the label — cleaner than v2 (no rule)
+        g.setColour(Pal::Border);
+        g.fillRect(b.getX(), b.getBottom() + 1, b.getWidth(), 1);
     }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  KNOB  — compact, gold arc on blue, white label
+//  KNOB  — compact rotary with accent arc and label below
 // ─────────────────────────────────────────────────────────────────────────────
 class Knob : public juce::Component {
 public:
@@ -312,14 +329,15 @@ public:
     }
 
     void resized() override {
-        slider.setBounds(getLocalBounds().withTrimmedBottom(18).reduced(2));
+        slider.setBounds(getLocalBounds().withTrimmedBottom(16).reduced(2));
     }
 
     void paint(juce::Graphics& g) override {
-        auto labelArea = getLocalBounds().removeFromBottom(18);
         g.setFont(Fonts::label(9.5f));
         g.setColour(Pal::Mid);
-        g.drawText(lbl_.toUpperCase(), labelArea, juce::Justification::centred);
+        g.drawText(lbl_.toUpperCase(),
+                   getLocalBounds().removeFromBottom(16),
+                   juce::Justification::centred);
     }
 
 private:
@@ -327,7 +345,7 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  XY PAD  — Vowel × Openness, blue background with gold cursor
+//  XY PAD  — Vowel × Openness
 // ─────────────────────────────────────────────────────────────────────────────
 class XYPad : public juce::Component {
 public:
@@ -348,55 +366,58 @@ public:
         auto b = getLocalBounds().toFloat();
 
         g.setColour(Pal::Raised);
-        g.fillRoundedRectangle(b, 6.f);
+        g.fillRoundedRectangle(b, 5.f);
         g.setColour(Pal::Border);
-        g.drawRoundedRectangle(b.reduced(.5f), 6.f, 1.f);
+        g.drawRoundedRectangle(b.reduced(0.5f), 5.f, 1.f);
 
         auto inner = b.reduced(8.f);
 
         // Grid
-        g.setColour(Pal::Border.withAlpha(.6f));
+        g.setColour(Pal::Border.withAlpha(0.5f));
         g.drawHorizontalLine(int(inner.getCentreY()), inner.getX(), inner.getRight());
         g.drawVerticalLine  (int(inner.getCentreX()), inner.getY(), inner.getBottom());
 
-        // Position
-        float nx = (xMax_ > xMin_) ? float((xs_.getValue() - xMin_) / (xMax_ - xMin_)) : 0.f;
-        float ny = (yMax_ > yMin_) ? float((ys_.getValue() - yMin_) / (yMax_ - yMin_)) : 0.f;
-        nx = juce::jlimit(0.f, 1.f, nx);
-        ny = juce::jlimit(0.f, 1.f, ny);
+        const float nx = (xMax_ > xMin_)
+            ? juce::jlimit(0.f, 1.f, float((xs_.getValue() - xMin_) / (xMax_ - xMin_)))
+            : 0.f;
+        const float ny = (yMax_ > yMin_)
+            ? juce::jlimit(0.f, 1.f, float((ys_.getValue() - yMin_) / (yMax_ - yMin_)))
+            : 0.f;
 
-        float px = inner.getX() + nx * inner.getWidth();
-        float py = inner.getBottom() - ny * inner.getHeight();
+        const float px = inner.getX() + nx * inner.getWidth();
+        const float py = inner.getBottom() - ny * inner.getHeight();
 
-        // Crosshair
-        g.setColour(Pal::Primary.withAlpha(.15f));
+        // Crosshair glow
+        g.setColour(Pal::Primary.withAlpha(0.1f));
         g.drawHorizontalLine(int(py), inner.getX(), inner.getRight());
         g.drawVerticalLine  (int(px), inner.getY(), inner.getBottom());
 
-        // Gold cursor
-        g.setColour(Pal::Primary.withAlpha(.3f));
-        g.fillEllipse(px - 10.f, py - 10.f, 20.f, 20.f);
+        // Cursor — outer halo + solid amber dot + dark centre
+        g.setColour(Pal::Primary.withAlpha(0.2f));
+        g.fillEllipse(px - 11.f, py - 11.f, 22.f, 22.f);
+        g.setColour(Pal::Primary.withAlpha(0.5f));
+        g.fillEllipse(px - 7.f, py - 7.f, 14.f, 14.f);
         g.setColour(Pal::Primary);
-        g.fillEllipse(px - 5.f, py - 5.f, 10.f, 10.f);
+        g.fillEllipse(px - 4.f, py - 4.f, 8.f, 8.f);
         g.setColour(Pal::Base);
-        g.fillEllipse(px - 2.f, py - 2.f, 4.f, 4.f);
+        g.fillEllipse(px - 1.5f, py - 1.5f, 3.f, 3.f);
 
-        // Axis labels — white
+        // Axis labels
         g.setFont(Fonts::label(9.f));
         g.setColour(Pal::Mid);
-        g.drawText(xl_, int(inner.getRight()) - 40, int(inner.getBottom()) + 1, 40, 12,
+        g.drawText(xl_, int(inner.getRight()) - 40, int(inner.getBottom()) + 1, 40, 11,
                    juce::Justification::centredRight);
-        g.drawText(yl_, int(inner.getX()), int(inner.getY()) - 12, 40, 12,
+        g.drawText(yl_, int(inner.getX()), int(inner.getY()) - 11, 40, 11,
                    juce::Justification::centredLeft);
 
-        // Vowel markers — white, gold highlight when near
+        // Vowel position markers
         static const char* kVowels[] = {"A", "E", "I", "O", "U"};
         g.setFont(Fonts::label(9.5f));
         for (int i = 0; i < 5; ++i) {
-            float vx   = inner.getX() + (float(i) / 4.f) * inner.getWidth();
-            bool  near = std::abs(nx - float(i) / 4.f) < 0.08f;
-            g.setColour(near ? Pal::Primary : Pal::Mid);
-            g.drawText(kVowels[i], int(vx) - 8, int(b.getBottom()) - 14, 16, 12,
+            const float vx  = inner.getX() + (float(i) / 4.f) * inner.getWidth();
+            const bool  near = std::abs(nx - float(i) / 4.f) < 0.08f;
+            g.setColour(near ? Pal::Primary : Pal::Mid.withAlpha(0.7f));
+            g.drawText(kVowels[i], int(vx) - 8, int(b.getBottom()) - 13, 16, 11,
                        juce::Justification::centred);
         }
     }
@@ -411,9 +432,9 @@ private:
     float xMin_ = 0.f, xMax_ = 1.f, yMin_ = 0.f, yMax_ = 1.f;
 
     void update(const juce::MouseEvent& e) {
-        auto b  = getLocalBounds().toFloat().reduced(8.f);
-        float nx = juce::jlimit(0.f, 1.f, (e.position.x - b.getX()) / b.getWidth());
-        float ny = juce::jlimit(0.f, 1.f, 1.f - (e.position.y - b.getY()) / b.getHeight());
+        auto   b  = getLocalBounds().toFloat().reduced(8.f);
+        float  nx = juce::jlimit(0.f, 1.f, (e.position.x - b.getX()) / b.getWidth());
+        float  ny = juce::jlimit(0.f, 1.f, 1.f - (e.position.y - b.getY()) / b.getHeight());
         xs_.setValue(xMin_ + nx * (xMax_ - xMin_), juce::sendNotificationAsync);
         ys_.setValue(yMin_ + ny * (yMax_ - yMin_), juce::sendNotificationAsync);
     }
@@ -427,18 +448,27 @@ public:
     void set(float a, float d, float s, float r) { a_=a; d_=d; s_=s; r_=r; repaint(); }
     void paint(juce::Graphics& g) override {
         auto b = getLocalBounds().toFloat().reduced(3);
-        AncientLAF::panel(g, b); b = b.reduced(8, 6);
-        float tot = a_ + d_ + .2f + r_, W = b.getWidth(), top = b.getY(), bot = b.getBottom();
-        float x1 = b.getX() + a_/tot*W, x2 = x1 + d_/tot*W;
-        float x3 = x2 + .2f/tot*W;
-        float sy = top + (1.f - s_) * b.getHeight();
+        AncientLAF::panel(g, b);
+        b = b.reduced(8, 6);
+        const float tot = a_ + d_ + 0.2f + r_;
+        const float W   = b.getWidth();
+        const float top = b.getY(), bot = b.getBottom();
+        const float x1  = b.getX() + a_ / tot * W;
+        const float x2  = x1 + d_ / tot * W;
+        const float x3  = x2 + 0.2f / tot * W;
+        const float sy  = top + (1.f - s_) * b.getHeight();
         juce::Path p;
         p.startNewSubPath(b.getX(), bot);
-        p.lineTo(x1, top); p.lineTo(x2, sy); p.lineTo(x3, sy); p.lineTo(x3 + r_/tot*W, bot);
-        juce::Path fill = p; fill.lineTo(b.getX(), bot); fill.closeSubPath();
-        g.setColour(Pal::Primary.withAlpha(.12f)); g.fillPath(fill);
-        g.setColour(Pal::Primary.withAlpha(.85f));
+        p.lineTo(x1, top); p.lineTo(x2, sy); p.lineTo(x3, sy);
+        p.lineTo(x3 + r_ / tot * W, bot);
+        juce::Path fill = p;
+        fill.lineTo(b.getX(), bot);
+        fill.closeSubPath();
+        g.setColour(Pal::Primary.withAlpha(0.10f));
+        g.fillPath(fill);
+        g.setColour(Pal::Primary.withAlpha(0.80f));
         g.strokePath(p, juce::PathStrokeType(1.5f));
     }
-private: float a_=.05f, d_=.2f, s_=.85f, r_=1.2f;
+private:
+    float a_ = 0.05f, d_ = 0.2f, s_ = 0.85f, r_ = 1.2f;
 };

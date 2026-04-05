@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="AncVox1" name="AncientVoices" projectType="audioplug" useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" companyName="Tully EDM Vibe"
+              companyCopyright="(c)(p) 2026 Tully EDM Vibe" companyWebsite="www.tullyedmvibe.com"
+              companyEmail="info@tullyedmvibe.com" pluginName="Ancient Voices"
+              pluginDesc="Ancient Vocal Transformer" pluginManufacturer="Tully EDM Vibe"
+              pluginManufacturerCode="Tull" pluginCode="AV06" cppLanguageStandard="17"
+              pluginIsSynth="0" pluginWantsMidiInput="0" pluginProducesMidiOut="0"
+              pluginIsMidiEffectPlugin="0" pluginEditorRequiresKeys="0" pluginAUExportPrefix="AncientVoices"
+              pluginRTASCategory="" aaxIdentifier="com.TullyEDMVibe.AncientVoices"
+              pluginVSTCategory="kPlugCategEffect" pluginVST3Category="Fx"
+              pluginAUMainType="'aufx'" bundleIdentifier="com.TullyEDMVibe.AncientVoices">
+  <MAINGROUP id="AncVox2" name="AncientVoices">
+    <GROUP id="{ANC00001-0000-0000-0000-000000000001}" name="Source">
+      <FILE id="FgmWqO" name="AncientVoicesConfig.h" compile="0" resource="0"
+            file="Source/AncientVoicesConfig.h"/>
+      <FILE id="anc0001" name="PluginProcessor.cpp" compile="1" resource="0"
+            file="Source/PluginProcessor.cpp"/>
+      <FILE id="anc0002" name="PluginProcessor.h" compile="0" resource="0"
+            file="Source/PluginProcessor.h"/>
+      <FILE id="anc0003" name="PluginEditor.cpp" compile="1" resource="0"
+            file="Source/PluginEditor.cpp"/>
+      <FILE id="anc0004" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
+    </GROUP>
+    <GROUP id="{ANC00001-0000-0000-0000-000000000002}" name="DSP">
+      <FILE id="anc0005" name="FormantFilter.h" compile="0" resource="0"
+            file="Source/DSP/FormantFilter.h"/>
+      <FILE id="anc0006" name="HumanizeEngine.h" compile="0" resource="0"
+            file="Source/DSP/HumanizeEngine.h"/>
+    </GROUP>
+    <GROUP id="{ANC00001-0000-0000-0000-000000000003}" name="Data">
+      <FILE id="anc0010" name="VowelTables.h" compile="0" resource="0" file="Source/Data/VowelTables.h"/>
+      <FILE id="anc0011" name="IntervalTables.h" compile="0" resource="0"
+            file="Source/Data/IntervalTables.h"/>
+      <FILE id="anc0012" name="Presets.h" compile="0" resource="0" file="Source/Data/Presets.h"/>
+    </GROUP>
+    <GROUP id="{ANC00001-0000-0000-0000-000000000004}" name="UI">
+      <FILE id="anc0013" name="UI.h" compile="0" resource="0" file="Source/UI/UI.h"/>
+      <FILE id="anc0014" name="FormantScope.h" compile="0" resource="0" file="Source/UI/FormantScope.h"/>
+      <FILE id="anc0015" name="VoicePanel.h" compile="0" resource="0" file="Source/UI/VoicePanel.h"/>
+      <FILE id="anc0016" name="AncientPanel.h" compile="0" resource="0" file="Source/UI/AncientPanel.h"/>
+      <FILE id="anc0017" name="FXPanel.h" compile="0" resource="0" file="Source/UI/FXPanel.h"/>
+    </GROUP>
+  </MAINGROUP>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="1"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_cryptography" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+  </MODULES>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_VST3_CAN_REPLACE_VST2="0"/>
+  <EXPORTFORMATS>
+    <XCODE_MAC targetFolder="Builds/MacOSX" extraLinkerFlags="-L/opt/homebrew/lib -lrubberband"
+               externalLibraries="rubberband" extraCompilerFlags="-I/opt/homebrew/include/rubberband">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Ancient Voices" headerPath="/opt/homebrew/include"
+                       libraryPath="/opt/homebrew/lib"/>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Ancient Voices" headerPath="/opt/homebrew/include"
+                       libraryPath="/opt/homebrew/lib"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_cryptography" path="../JUCE/modules"/>
+      </MODULEPATHS>
+    </XCODE_MAC>
+  </EXPORTFORMATS>
+</JUCERPROJECT>

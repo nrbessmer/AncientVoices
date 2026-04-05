@@ -1,17 +1,23 @@
 #include "PluginEditor.h"
 
+#if !ANCIENT_VOICES_MINIMAL_EDITOR
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  FULL EDITOR IMPLEMENTATION
+// ─────────────────────────────────────────────────────────────────────────────
+
 AncientVoicesEditor::AncientVoicesEditor(AncientVoicesProcessor& p)
     : AudioProcessorEditor(&p),
       proc_(p),
+      presetMgr_   (p.getPresets()),
       voicePanel_  (p.apvts),
       ancientPanel_(p.apvts),
       fxPanel_     (p.apvts)
 {
-    // Exact Ancient Synth constructor order — proven to work in Logic
     setLookAndFeel(&laf_);
     setSize(kW, kH);
     setResizable(false, false);
-    setOpaque(true);
+    
 
     titleLabel_.setText("ANCIENT VOICES", juce::dontSendNotification);
     titleLabel_.setFont(Fonts::display(17.f));
@@ -77,36 +83,29 @@ void AncientVoicesEditor::buildTree()
 
 void AncientVoicesEditor::paint(juce::Graphics& g)
 {
-    // Match Ancient Synth pattern exactly
     g.fillAll(Pal::Base);
     AncientLAF::bg(g, getLocalBounds());
 
-    // Header
     g.setColour(Pal::Surface);
     g.fillRect(getLocalBounds().removeFromTop(52));
 
-    // Borders — same style as Ancient Synth
     g.setColour(Pal::Border);
-    g.fillRect(0,   52, getWidth(), 1);              // header bottom
-    g.fillRect(190, 53, 1, getHeight() - 74);        // sidebar right
-    g.fillRect(0, getHeight() - 21, getWidth(), 1);  // footer top
+    g.fillRect(0,   52, getWidth(), 1);
+    g.fillRect(190, 53, 1, getHeight() - 74);
+    g.fillRect(0, getHeight() - 21, getWidth(), 1);
 
-    // Gold header accent line
     g.setColour(Pal::Primary);
     g.fillRect(0, 50, getWidth(), 2);
 
-    // Footer background
     g.setColour(Pal::Surface);
     g.fillRect(0, getHeight() - 20, getWidth(), 20);
 
-    // Copyright left
     g.setFont(Fonts::mono(9.f));
     g.setColour(Pal::Low);
     g.drawText("(c)(p) 2026 Tully EDM Vibe  |  info@tullyedmvibe.com",
                8, getHeight() - 19, getWidth() - 16, 16,
                juce::Justification::centredLeft);
 
-    // Version right
     g.setColour(Pal::Low);
     g.drawText("Ancient Voices v1.0",
                8, getHeight() - 19, getWidth() - 16, 16,
@@ -118,8 +117,6 @@ void AncientVoicesEditor::resized()
     if (getWidth() <= 0 || getHeight() <= 0) return;
 
     auto full = getLocalBounds();
-
-    // Strip footer from layout so components don't overlap it
     full.removeFromBottom(21);
 
     auto header = full.removeFromTop(52);
@@ -198,3 +195,5 @@ void AncientVoicesEditor::selectCurrentInTree()
         }
     }
 }
+
+#endif  // !ANCIENT_VOICES_MINIMAL_EDITOR

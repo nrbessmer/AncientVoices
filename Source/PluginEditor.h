@@ -1,6 +1,49 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EDITOR MODE TOGGLE
+//  1 = minimal gold rectangle  (confirms AU Cocoa view factory works in Logic)
+//  0 = full Ancient Voices UI
+//  Change the value, rebuild.
+// ─────────────────────────────────────────────────────────────────────────────
+#define ANCIENT_VOICES_MINIMAL_EDITOR 0
+
+// ─────────────────────────────────────────────────────────────────────────────
+#if ANCIENT_VOICES_MINIMAL_EDITOR
+
+class AncientVoicesEditor : public juce::AudioProcessorEditor
+{
+public:
+    static constexpr int kW = 400;
+    static constexpr int kH = 200;
+
+    explicit AncientVoicesEditor(AncientVoicesProcessor& p)
+        : AudioProcessorEditor(&p)
+    {
+        setSize(kW, kH);
+        setOpaque(true);
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        g.fillAll(juce::Colour(0xFFE8B84B));
+        g.setColour(juce::Colours::black);
+        g.setFont(18.f);
+        g.drawText("Ancient Voices — MINIMAL TEST EDITOR",
+                   getLocalBounds(), juce::Justification::centred);
+    }
+
+    void resized() override {}
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AncientVoicesEditor)
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+#else  // full editor
+
 #include "UI/UI.h"
 #include "UI/FormantScope.h"
 #include "UI/VoicePanel.h"
@@ -8,16 +51,11 @@
 #include "UI/FXPanel.h"
 #include "Data/Presets.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  PRESET TREE ITEM  — either a category header or a leaf preset
-// ─────────────────────────────────────────────────────────────────────────────
 class PresetTreeItem : public juce::TreeViewItem {
 public:
-    // Category header
     explicit PresetTreeItem(const juce::String& catName)
         : isCat_(true), catName_(catName), presetIdx_(-1) {}
 
-    // Leaf preset
     PresetTreeItem(const juce::String& name, int idx)
         : isCat_(false), catName_(name), presetIdx_(idx) {}
 
@@ -29,7 +67,6 @@ public:
 
     void paintItem(juce::Graphics& g, int w, int h) override {
         if (isCat_) {
-            // Per-category accent colour
             struct CatCol { juce::String cat; juce::Colour col; };
             static const CatCol kCatCols[] = {
                 { "Chant",   Pal::Primary },
@@ -46,12 +83,9 @@ public:
 
             g.setColour(isOpen() ? Pal::Raised : Pal::Surface);
             g.fillRect(0, 0, w, h);
-
-            // Left accent bar
             g.setColour(accent);
             g.fillRect(0, 0, 3, h);
 
-            // Triangle
             float tx = 10.f, ty = h * .5f;
             juce::Path tri;
             if (isOpen()) tri.addTriangle(tx, ty - 3.5f, tx + 7.f, ty - 3.5f, tx + 3.5f, ty + 3.f);
@@ -61,7 +95,6 @@ public:
             g.setFont(Fonts::label(10.5f));
             g.setColour(isOpen() ? Pal::High : Pal::Mid);
             g.drawText(catName_.toUpperCase(), 24, 0, w - 26, h, juce::Justification::centredLeft);
-
         } else {
             bool sel = isSelected();
             if (sel) {
@@ -81,14 +114,11 @@ public:
     }
 
 private:
-    bool        isCat_;
+    bool         isCat_;
     juce::String catName_;
-    int         presetIdx_;
+    int          presetIdx_;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  EDITOR
-// ─────────────────────────────────────────────────────────────────────────────
 class AncientVoicesEditor : public juce::AudioProcessorEditor,
                              private juce::Timer,
                              private juce::Button::Listener
@@ -106,37 +136,30 @@ public:
 private:
     AncientVoicesProcessor& proc_;
     AncientLAF              laf_;
-    AVPresetManager         presetMgr_;
+    AVPresetManager&        presetMgr_;   // reference to processor's instance — stays in sync with DAW
 
-    // ── Header ────────────────────────────────────────────────────────────
     juce::Label      titleLabel_, presetNameLabel_, presetCatLabel_;
     juce::TextButton prevBtn_{"<"}, nextBtn_{">"};
 
-    // ── Preset tree browser ───────────────────────────────────────────────
     juce::TreeView   presetTree_;
     PresetTreeItem   treeRoot_ { juce::String("Root") };
     void buildTree();
 
-    // ── Tab panels ────────────────────────────────────────────────────────
     juce::TabbedComponent tabs_{ juce::TabbedButtonBar::TabsAtTop };
     VoicePanel   voicePanel_;
     AncientPanel ancientPanel_;
     AVFXPanel    fxPanel_;
 
-    // ── Formant scope ─────────────────────────────────────────────────────
     FormantScope formantScope_;
     juce::AudioBuffer<float> scopeSnap_;
 
-    // ── Timer ─────────────────────────────────────────────────────────────
     void timerCallback() override;
-
-    // ── Button listener ───────────────────────────────────────────────────
     void buttonClicked(juce::Button*) override;
-
-    // ── Helpers ───────────────────────────────────────────────────────────
     void loadPreset(int idx);
     void updatePresetLabel();
     void selectCurrentInTree();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AncientVoicesEditor)
 };
+
+#endif  // ANCIENT_VOICES_MINIMAL_EDITOR

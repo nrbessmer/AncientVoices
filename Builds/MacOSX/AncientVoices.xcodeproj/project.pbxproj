@@ -851,7 +851,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_NDEBUG=1",
 					"NDEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -927,7 +927,7 @@
 				);
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -941,7 +941,7 @@
 				);
 				LLVM_LTO = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-L/opt/homebrew/lib -lrubberband";
@@ -968,7 +968,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_NDEBUG=1",
 					"NDEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -1044,7 +1044,7 @@
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				GENERATE_PKGINFO_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -1061,7 +1061,7 @@
 				LIBRARY_STYLE = Bundle;
 				LLVM_LTO = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-bundle -lAncient\\ Voices -lrubberband -L/opt/homebrew/lib -lrubberband";
@@ -1137,7 +1137,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_NDEBUG=1",
 					"NDEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -1212,7 +1212,7 @@
 				);
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -1227,7 +1227,7 @@
 				);
 				LLVM_LTO = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-lAncient\\ Voices -lrubberband -L/opt/homebrew/lib -lrubberband";
@@ -1253,7 +1253,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_NDEBUG=1",
 					"NDEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -1329,7 +1329,7 @@
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				GENERATE_PKGINFO_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -1346,7 +1346,7 @@
 				LIBRARY_STYLE = Bundle;
 				LLVM_LTO = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-bundle -lAncient\\ Voices -lrubberband -L/opt/homebrew/lib -lrubberband";
@@ -1422,7 +1422,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_NDEBUG=1",
 					"NDEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -1497,7 +1497,7 @@
 				);
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -1512,7 +1512,7 @@
 				);
 				LLVM_LTO = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-L/opt/homebrew/lib -lrubberband";
@@ -1554,7 +1554,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_DEBUG=1",
 					"DEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -1630,7 +1630,7 @@
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				GENERATE_PKGINFO_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -1646,7 +1646,7 @@
 				);
 				LIBRARY_STYLE = Bundle;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-bundle -lAncient\\ Voices -lrubberband -L/opt/homebrew/lib -lrubberband";
@@ -1674,7 +1674,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_DEBUG=1",
 					"DEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -1750,7 +1750,7 @@
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				GENERATE_PKGINFO_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -1766,7 +1766,7 @@
 				);
 				LIBRARY_STYLE = Bundle;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-bundle -lAncient\\ Voices -lrubberband -L/opt/homebrew/lib -lrubberband";
@@ -1793,7 +1793,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_DEBUG=1",
 					"DEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -1869,7 +1869,7 @@
 				);
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -1882,7 +1882,7 @@
 					"\"/opt/homebrew/lib\"",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-L/opt/homebrew/lib -lrubberband";
@@ -1909,7 +1909,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_DEBUG=1",
 					"DEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -1984,7 +1984,7 @@
 				);
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -1998,7 +1998,7 @@
 					"\"/opt/homebrew/lib\"",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-L/opt/homebrew/lib -lrubberband";
@@ -2024,7 +2024,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"_DEBUG=1",
 					"DEBUG=1",
-					"JUCE_PROJUCER_VERSION=0x8000c",
+					"JUCE_PROJUCER_VERSION=0x8000a",
 					"JUCE_MODULE_AVAILABLE_juce_audio_basics=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_devices=1",
 					"JUCE_MODULE_AVAILABLE_juce_audio_formats=1",
@@ -2099,7 +2099,7 @@
 				);
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
 				HEADER_SEARCH_PATHS = (
-					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK",
+					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK",
 					"$(SRCROOT)/../../JuceLibraryCode",
 					"/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules",
 					"/opt/homebrew/include",
@@ -2113,7 +2113,7 @@
 					"\"/opt/homebrew/lib\"",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
-				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
+				MTL_HEADER_SEARCH_PATHS = "/Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules /opt/homebrew/include /Volumes/Rocket_XTRM/Projects/PluginBreeze/JUCE/modules/juce_audio_plugin_client/AU";
 				OTHER_CFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_CPLUSPLUSFLAGS = "-I/opt/homebrew/include/rubberband";
 				OTHER_LDFLAGS = "-lAncient\\ Voices -lrubberband -L/opt/homebrew/lib -lrubberband";

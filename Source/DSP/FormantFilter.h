@@ -36,7 +36,9 @@ struct SVFBand {
     void setParams(float freqHz, float bwHz) {
         const float f = juce::jlimit(20.f, float(sr_) * 0.48f, freqHz);
         const float g = std::tan(juce::MathConstants<float>::pi * f / float(sr_));
-        const float k = f / juce::jmax(20.f, bwHz);
+        // k = damping = 1/Q.  Bandpass Q = center/bandwidth, so k = bandwidth/center.
+        // FIXED: was k = f/bw → Q≈0.22 (flat). Correct: k = bw/f → Q≈4.56 (sharp peaks).
+        const float k = juce::jmax(1.f, bwHz) / f;
         a1_ = 1.f / (1.f + g * (g + k));
         a2_ = g * a1_;
         a3_ = g * a2_;
@@ -120,6 +122,9 @@ public:
     void setDepth       (float d) { depth_ = juce::jlimit(0.f,1.f,d);     dirty_ = true; }
     void setBwMul       (float m) { bwMul_ = juce::jlimit(0.2f,2.0f,m);   dirty_ = true; }
 
+    // ── Diagnostic accessor (audio thread only — same thread that writes normGain_ via tick()) ──
+    float getNormGain() const noexcept { return normGain_; }
+
     // ── Per-sample render ───────────────────────────────────────────────────
     // CONTRACT: output contains zero component of x (dry).
     // Dry is added ONLY in processBlock's final crossfade.
@@ -159,7 +164,7 @@ public:
 
 private:
     // Normalization constants
-    static constexpr float kNormMin   = 1.f;    // never reduce below base gain
+    static constexpr float kNormMin   = 0.1f;   // allow 10× attenuation; high-Q resonance can amplify 4–8× before normGain compensates
     static constexpr float kNormMax   = 20.f;   // max boost: prevents runaway on silence
     static constexpr float kNormAlpha = 0.005f; // smoothing ≈ 200 samples / 4.5 ms
 

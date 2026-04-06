@@ -2,22 +2,18 @@
 
 #if !ANCIENT_VOICES_MINIMAL_EDITOR
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  FULL EDITOR IMPLEMENTATION
-// ─────────────────────────────────────────────────────────────────────────────
-
 AncientVoicesEditor::AncientVoicesEditor(AncientVoicesProcessor& p)
     : AudioProcessorEditor(&p),
       proc_(p),
       presetMgr_   (p.getPresets()),
       voicePanel_  (p.apvts),
       ancientPanel_(p.apvts),
-      fxPanel_     (p.apvts)
+      fxPanel_     (p.apvts),
+      diagOverlay_ (p)
 {
     setLookAndFeel(&laf_);
     setSize(kW, kH);
     setResizable(false, false);
-    
 
     titleLabel_.setText("ANCIENT VOICES", juce::dontSendNotification);
     titleLabel_.setFont(Fonts::display(17.f));
@@ -50,6 +46,10 @@ AncientVoicesEditor::AncientVoicesEditor(AncientVoicesProcessor& p)
     addAndMakeVisible(tabs_);
 
     addAndMakeVisible(formantScope_);
+
+    // Diagnostic overlay — added last so it is on top of all siblings
+    addAndMakeVisible(diagOverlay_);
+    diagOverlay_.toFront(false);
 
     updatePresetLabel();
     startTimerHz(30);
@@ -105,8 +105,6 @@ void AncientVoicesEditor::paint(juce::Graphics& g)
     g.drawText("(c)(p) 2026 Tully EDM Vibe  |  info@tullyedmvibe.com",
                8, getHeight() - 19, getWidth() - 16, 16,
                juce::Justification::centredLeft);
-
-    g.setColour(Pal::Low);
     g.drawText("Ancient Voices v1.0",
                8, getHeight() - 19, getWidth() - 16, 16,
                juce::Justification::centredRight);
@@ -121,14 +119,30 @@ void AncientVoicesEditor::resized()
 
     auto header = full.removeFromTop(52);
     header.reduce(12, 0);
-    titleLabel_.setBounds    (header.removeFromLeft(180).withSizeKeepingCentre(180, 28));
+
+    titleLabel_.setBounds(header.removeFromLeft(180).withSizeKeepingCentre(180, 28));
     header.removeFromLeft(12);
     presetCatLabel_.setBounds (header.removeFromLeft(70).withSizeKeepingCentre(70, 14));
     presetNameLabel_.setBounds(header.removeFromLeft(200).withSizeKeepingCentre(200, 20));
+
+    // ── "D" button slot — 30px allocated from header BEFORE nav buttons ──
+    //  Without this allocation, the button would overlap nextBtn_ (which
+    //  ends at x=848). Allocating here keeps them adjacent, no overlap.
+    //  diagOverlay_ collapses into this slot; expands leftward on toggle.
+    const auto diagSlice = header.removeFromRight(DiagnosticOverlay::kSliceW);
+
     auto nav = header.removeFromRight(72).withSizeKeepingCentre(72, 26);
     prevBtn_.setBounds(nav.removeFromLeft(34));
     nav.removeFromLeft(4);
     nextBtn_.setBounds(nav);
+
+    // Position overlay in collapsed state (centred within the 30px slice)
+    {
+        const int cx = diagSlice.getCentreX() - DiagnosticOverlay::kBtnSz / 2;
+        diagOverlay_.setBounds(cx, 14,
+                               DiagnosticOverlay::kBtnSz,
+                               DiagnosticOverlay::kBtnSz);
+    }
 
     presetTree_.setBounds(full.removeFromLeft(190).reduced(0, 2));
 
@@ -196,4 +210,4 @@ void AncientVoicesEditor::selectCurrentInTree()
     }
 }
 
-#endif  // !ANCIENT_VOICES_MINIMAL_EDITOR
+#endif

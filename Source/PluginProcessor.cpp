@@ -1,524 +1,1604 @@
+#include <juce_dsp/juce_dsp.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <unistd.h>
+#include <rubberband/RubberBandStretcher.h>
 
-using namespace AVC;
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  MEASUREMENT HELPERS — audio thread only, no allocation, no lock
-//
-//  stereoMidRmsDb: measures (L+R)/2 energy — correct mono-equivalent for a
-//    stereo signal. Using channel-0 only under-represents voices panned away
-//    from centre (8 voices with spread=0.6 causes ~6 dB false C2 failure).
-//
-//  bufferPeakLinear: finds the peak absolute value across ALL channels.
-//    Used for limiter GR — immune to the JUCE Limiter's lookahead delay.
-//    (RMS comparison gives false positive GR when signal transitions loud→quiet
-//    because preLimDb measures the current quiet input while postLimDb measures
-//    the delayed loud block still flushing through the lookahead buffer.)
-// ─────────────────────────────────────────────────────────────────────────────
-static float stereoMidRmsDb(const float* L, const float* R, int n) noexcept
+//==============================================================================
+AncientVoicesAudioProcessor::AncientVoicesAudioProcessor()
+    : AudioProcessor (BusesProperties()
+                      .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                      .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      fft (11),
+      windowFunction(512, juce::dsp::WindowingFunction<float>::hann),
+      fftSize (2048),
+      hopSize (512),
+      overlapPosition (0),
+      profileIndex (0),
+      apvts (*this, nullptr, "Parameters", createParameters())
 {
-    float sum = 0.f;
-    for (int i = 0; i < n; ++i) {
-        const float m = (L[i] + R[i]) * 0.5f;
-        sum += m * m;
-    }
-    const float rms = std::sqrt(sum / float(juce::jmax(1, n)));
-    return (rms > 1e-9f && std::isfinite(rms)) ? 20.f * std::log10(rms) : -96.f;
+    // Initialize profiles with their settings
+    initializeProfiles();
+    // Set currentProfile to the initial profile
+    currentProfile = profiles[0];
+    inputBuffer.setSize(getTotalNumInputChannels(), 0);
 }
 
-static float bufferPeakLinear(const juce::AudioBuffer<float>& buf, int ns) noexcept
+AncientVoicesAudioProcessor::~AncientVoicesAudioProcessor()
 {
-    float peak = 0.f;
-    for (int ch = 0; ch < buf.getNumChannels(); ++ch) {
-        const float* d = buf.getReadPointer(ch);
-        for (int s = 0; s < ns; ++s) peak = juce::jmax(peak, std::abs(d[s]));
+    // Clean up RubberBandStretcher if it exists
+    if (rubberBandStretcher != nullptr)
+    {
+        rubberBandStretcher.reset();
     }
-    return peak;
+
+    // Clear DSP modules
+    resetDSPModules();
+
+    // Clear delay lines
+    delayLines.clear();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  PARAMETER LAYOUT
-// ─────────────────────────────────────────────────────────────────────────────
-juce::AudioProcessorValueTreeState::ParameterLayout
-AncientVoicesProcessor::createParams()
+//==============================================================================
+juce::AudioProcessorValueTreeState::ParameterLayout AncientVoicesAudioProcessor::createParameters()
 {
-    std::vector<std::unique_ptr<juce::RangedAudioParameter>> p;
-    auto f = [&](const char* id, const char* name, float lo, float hi, float def) {
-        p.push_back(std::make_unique<juce::AudioParameterFloat>(id, name, lo, hi, def));
-    };
-    auto i = [&](const char* id, const char* name, int lo, int hi, int def) {
-        p.push_back(std::make_unique<juce::AudioParameterInt>(id, name, lo, hi, def));
-    };
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
-    f(ParamID::kVowelPos,     "Vowel",         0.f,   4.f,   Defaults::kVowelPos);
-    f(ParamID::kVowelOpen,    "Openness",      0.5f,  1.5f,  Defaults::kVowelOpen);
-    f(ParamID::kGender,       "Gender",        0.7f,  1.4f,  Defaults::kGender);
-    f(ParamID::kBreathe,      "Breathe",       0.f,   1.f,   Defaults::kBreathe);
-    f(ParamID::kRoughness,    "Roughness",     0.f,   1.f,   Defaults::kRoughness);
-    f(ParamID::kFormantShift, "Formant Shift", -12.f, 12.f,  Defaults::kFormantShift);
-    f(ParamID::kFormantDepth, "Depth",         0.f,   1.f,   Defaults::kFormantDepth);
-    i(ParamID::kEra,          "Era",           0, 3,  Defaults::kEra);
-    i(ParamID::kVoiceMode,    "Mode",          0, 3,  Defaults::kVoiceMode);
-    i(ParamID::kNumVoices,    "Voices",        1, 8,  Defaults::kNumVoices);
-    f(ParamID::kSpread,       "Spread",        0.f,   1.f,   Defaults::kSpread);
-    f(ParamID::kDrift,        "Drift",         0.f,   1.f,   Defaults::kDrift);
-    f(ParamID::kChant,        "Chant",         0.f,   1.f,   Defaults::kChant);
-    i(ParamID::kInterval,     "Interval",      0, 6,  Defaults::kInterval);
-    f(ParamID::kMix,          "Mix",           0.f,   1.f,   Defaults::kMix);
-    f(ParamID::kCaveMix,      "Cave Mix",      0.f,   1.f,   Defaults::kCaveMix);
-    f(ParamID::kCaveSize,     "Cave Size",     0.f,   1.f,   Defaults::kCaveSize);
-    f(ParamID::kCaveDamp,     "Cave Damp",     0.f,   1.f,   Defaults::kCaveDamp);
-    f(ParamID::kCaveEcho,     "Cave Echo ms",  0.f,   100.f, Defaults::kCaveEchoMs);
-    f(ParamID::kShimmerMix,   "Shimmer",       0.f,   1.f,   Defaults::kShimmerMix);
-    f(ParamID::kShimmerAmt,   "Shimmer Amt",   0.f,   1.f,   Defaults::kShimmerAmt);
-    f(ParamID::kEnvAttack,    "Attack",        0.001f,2.f,   0.01f);
-    f(ParamID::kEnvDecay,     "Decay",         0.001f,2.f,   0.1f);
-    f(ParamID::kEnvSustain,   "Sustain",       0.f,   1.f,   0.9f);
-    f(ParamID::kEnvRelease,   "Release",       0.001f,4.f,   0.5f);
-    f(ParamID::kMasterVol,    "Volume",        0.f,   1.f,   Defaults::kMasterVol);
-    f(ParamID::kMasterGain,   "Gain dB",       -24.f, 24.f,  Defaults::kMasterGainDb);
+    // Profile Parameter
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        "PROFILE_INDEX",                // Parameter ID
+        "Profile Index",                // Parameter name
+        0,                              // Minimum value
+        49,                             // Maximum value (50 presets)
+        0                               // Default index
+    ));
 
-    return { p.begin(), p.end() };
+    // Ancient Voices interactive parameters (Option B)
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        "ERA", "Era", 0, 3, 0));
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        "VOICE_MODE", "Voice Mode", 0, 3, 0));
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        "NUM_VOICES", "Num Voices", 1, 8, 4));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("SPREAD", 1), "Spread",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("DRIFT", 1), "Drift",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.2f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("CHANT", 1), "Chant",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.15f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("FORMANT_DEPTH", 1), "Formant Depth",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.9f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("MIX", 1), "Mix",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 1.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("CAVE_MIX", 1), "Cave Mix",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.6f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("CAVE_SIZE", 1), "Cave Size",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.75f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("SHIMMER_MIX", 1), "Shimmer Mix",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.2f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("BREATHE", 1), "Breathe",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.25f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("ROUGHNESS", 1), "Roughness",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.15f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("INTERVAL", 1), "Interval",
+        juce::NormalisableRange<float>(-24.0f, 24.0f), 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("OUTPUT_GAIN", 1), "Output Gain",
+        juce::NormalisableRange<float>(-24.0f, 6.0f), 0.0f));
+
+    return { params.begin(), params.end() };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  CONSTRUCTOR / DESTRUCTOR
-// ─────────────────────────────────────────────────────────────────────────────
-AncientVoicesProcessor::AncientVoicesProcessor()
-    : AudioProcessor(BusesProperties()
-          .withInput ("Input",  juce::AudioChannelSet::stereo(), true)
-          .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts(*this, nullptr, "AncientVoices", createParams())
-{}
-
-AncientVoicesProcessor::~AncientVoicesProcessor() { shimmerRB_.reset(); }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PREPARE
-// ─────────────────────────────────────────────────────────────────────────────
-void AncientVoicesProcessor::prepareToPlay(double sr, int blockSize)
+//==============================================================================
+void AncientVoicesAudioProcessor::releaseResources()
 {
-    sr_       = sr;
-    maxBlock_ = blockSize;
-    spec_ = { sr, juce::uint32(blockSize), juce::uint32(getTotalNumOutputChannels()) };
-
-    for (auto& c : copies_) c.prepare(sr);
-    humanizer_.prepare(sr);
-    for (int i = 0; i < kMaxCopies; ++i) humanizer_.triggerVoice(i);
-    reverb_.prepare(sr);
-
-    chorus_.prepare(spec_);
-    chorus_.setFeedback(0.f);
-
-    limiter_.prepare(spec_);
-    limiter_.setThreshold(kLimiterThresholdDb);
-    limiter_.setRelease  (kLimiterReleaseMs);
-
-    { std::mt19937 rng(77777);
-      std::uniform_real_distribution<float> d(-kMicroDetuneRange, kMicroDetuneRange);
-      for (auto& v : copyDetune_) v = d(rng); }
-
-    const int ch = getTotalNumOutputChannels();
-    workBuf_   .setSize(2,  blockSize, false, true, false);
-    monoInBuf_ .setSize(1,  blockSize, false, true, false);
-    dryBuf_    .setSize(ch, blockSize, false, true, false);
-    shimmerBuf_.setSize(ch, blockSize, false, true, false);
-
-    scopeFifo_.reset();
-    limiterConsecBlocks_ = 0;
-
-    diagState_.sampleRateHz.store(float(sr));
-    diagState_.blockSizeSmps.store(float(blockSize));
-
-    initShimmer(sr, ch);
-    updateCache();
-    updateModules();
+    // Release any resources if needed (e.g., when playback stops)
 }
 
-void AncientVoicesProcessor::releaseResources() { shimmerRB_.reset(); }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PROCESS BLOCK
-//
-//  Step 12 runs contract checks C1–C5. All measurements use stereo-mid RMS
-//  (L+R)/2 so that panned voices count equally, and peak-based GR for the
-//  limiter so the JUCE lookahead delay cannot invert the sign.
-// ─────────────────────────────────────────────────────────────────────────────
-void AncientVoicesProcessor::processBlock(juce::AudioBuffer<float>& buffer,
-                                           juce::MidiBuffer&)
+bool AncientVoicesAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
-    juce::ScopedNoDenormals nd;
+    // Check for mono and stereo main input and output channels
+    const auto mainInput = layouts.getMainInputChannelSet();
+    const auto mainOutput = layouts.getMainOutputChannelSet();
 
-    const int ns = buffer.getNumSamples();
-    const int ni = getTotalNumInputChannels();
-    const int no = getTotalNumOutputChannels();
-    if (ns <= 0 || no < 2) return;
-
-    if (ns > maxBlock_) {
-        workBuf_   .setSize(2,  ns, false, true, true);
-        monoInBuf_ .setSize(1,  ns, false, true, true);
-        dryBuf_    .setSize(no, ns, false, true, true);
-        shimmerBuf_.setSize(no, ns, false, true, true);
-        maxBlock_ = ns;
-    }
-
-    // ── 1. Save dry ───────────────────────────────────────────────────────
-    dryBuf_.makeCopyOf(buffer);
-
-    // Stereo-mid RMS: uses (L+R)/2 so centred and panned content weighs equally
-    const float dryRmsDb = stereoMidRmsDb(dryBuf_.getReadPointer(0),
-                                           dryBuf_.getReadPointer(1), ns);
-    diagState_.dryRmsDb.store(dryRmsDb);
-    diagState_.sampleRateHz.store(float(sr_));
-    diagState_.blockSizeSmps.store(float(ns));
-
-    // ── Throttled param update ────────────────────────────────────────────
-    if (stateRestorePending_.exchange(false) || ++paramCounter_ >= kParamUpdateBlocks) {
-        paramCounter_ = 0;
-        updateCache();
-        updateModules();
-    }
-
-    // ── 2. Mix to mono ────────────────────────────────────────────────────
-    float* mono = monoInBuf_.getWritePointer(0);
-    juce::FloatVectorOperations::copy(mono, buffer.getReadPointer(0), ns);
-    if (ni > 1) {
-        juce::FloatVectorOperations::add     (mono, buffer.getReadPointer(1), ns);
-        juce::FloatVectorOperations::multiply(mono, 0.5f, ns);
-    }
-
-    // ── 3. Breathe noise ──────────────────────────────────────────────────
-    if (cache_.breathe > 0.001f) {
-        for (int s = 0; s < ns; ++s) {
-            const float w = dist_(rng_);
-            breatheState_ = breatheState_ * 0.99f + w * 0.01f;
-            mono[s] += (w + breatheState_ * 3.f) * 0.25f * cache_.breathe * kBreatheNoiseLevel;
-        }
-    }
-
-    // ── 4. N × FormantFilter → stereo workBuf  (CONTRACT: zero dry) ───────
-    const int   n        = juce::jlimit(1, kMaxCopies, cache_.numCopies);
-    const float copyGain = 1.f / float(n);
-    bool nanDetectedThisBlock = false;
-
-    workBuf_.clear();
-    float* wL = workBuf_.getWritePointer(0);
-    float* wR = workBuf_.getWritePointer(1);
-
-    for (int ci = 0; ci < n; ++ci) {
-        const float pan    = copyPan_[ci];
-        const float panRad = (pan + 1.f) * 0.5f * juce::MathConstants<float>::halfPi;
-        const float panL   = std::cos(panRad);
-        const float panR   = std::sin(panRad);
-        const float interval   = 12.f * std::log2(juce::jmax(0.001f,
-                                     getVoiceRatio(ChoirInterval(cache_.interval), ci)));
-        const float roughScale = 0.02f + cache_.roughness * 0.15f;
-
-        for (int s = 0; s < ns; ++s) {
-            float in = mono[s];
-            if (!std::isfinite(in)) { in = 0.f; nanDetectedThisBlock = true; }
-
-            const auto hum = humanizer_.tick(ci);
-            copies_[ci].setFormantShift(cache_.formantShift + interval
-                                        + copyDetune_[ci]
-                                        + hum.pitchOffsetCents * roughScale);
-
-            const float out = copies_[ci].tick(in) * hum.ampOffset * copyGain;
-            wL[s] += out * panL;
-            wR[s] += out * panR;
-        }
-    }
-
-    // C5 sticky — once set, survives until plugin reload
-    if (nanDetectedThisBlock) diagState_.C5_noNanInf.store(false);
-
-    // ── 5. Wet boost (kWetBoost = 1.0 — unity) ────────────────────────────
-    juce::FloatVectorOperations::multiply(wL, kWetBoost, ns);
-    juce::FloatVectorOperations::multiply(wR, kWetBoost, ns);
-    juce::FloatVectorOperations::copy(buffer.getWritePointer(0), wL, ns);
-    juce::FloatVectorOperations::copy(buffer.getWritePointer(1), wR, ns);
-
-    // Wet RMS at step 5: stereo-mid so all panned voices contribute equally
-    const float wetRmsDb = stereoMidRmsDb(buffer.getReadPointer(0),
-                                           buffer.getReadPointer(1), ns);
-    diagState_.wetRmsDb.store(wetRmsDb);
-    diagState_.wetDryDiffDb.store(wetRmsDb - dryRmsDb);
-    diagState_.mixRatio.store(cache_.mix);
-    diagState_.voiceCount.store(float(cache_.numCopies));
-    diagState_.copyCount.store(float(cache_.numCopies));
-
-    // Per-copy normGain_ — read on audio thread (same thread that writes it via tick())
+    // Support identical mono or stereo channel layouts
+    if ((mainInput == juce::AudioChannelSet::mono() && mainOutput == juce::AudioChannelSet::mono()) ||
+        (mainInput == juce::AudioChannelSet::stereo() && mainOutput == juce::AudioChannelSet::stereo()))
     {
-        float ngMin = 1e9f, ngMax = 0.f;
-        for (int ci = 0; ci < n; ++ci) {
-            const float ng = copies_[ci].getNormGain();
-            ngMin = juce::jmin(ngMin, ng);
-            ngMax = juce::jmax(ngMax, ng);
-        }
-        diagState_.normGainMin.store(n > 0 ? ngMin : 0.f);
-        diagState_.normGainMax.store(ngMax);
+        return true;
     }
 
-    // ── 6. Chorus ─────────────────────────────────────────────────────────
-    { juce::dsp::AudioBlock<float> b(buffer);
-      chorus_.process(juce::dsp::ProcessContextReplacing<float>(b)); }
-
-    // ── 7. Saturation ─────────────────────────────────────────────────────
-    if (cache_.effSat > 0.001f) {
-        const float pre  = 1.f + cache_.effSat * 4.f;
-        const float post = 1.f / pre;
-        for (int ch = 0; ch < no; ++ch) {
-            float* d = buffer.getWritePointer(ch);
-            for (int s = 0; s < ns; ++s)
-                d[s] = std::tanh(d[s] * pre) * post;
-        }
-    }
-
-    // ── 8. Shimmer ────────────────────────────────────────────────────────
-    applyShimmer(buffer);
-
-    // ── 9. Cave reverb ────────────────────────────────────────────────────
-    { float* L = buffer.getWritePointer(0);
-      float* R = buffer.getWritePointer(1);
-      for (int s = 0; s < ns; ++s)
-          reverb_.process(L[s], R[s], L[s], R[s]); }
-
-    // ── 10. Limiter ───────────────────────────────────────────────────────
-    //
-    //  GR is measured using PEAK comparison, not RMS.
-    //
-    //  Why peak? The JUCE dsp::Limiter uses a lookahead delay. If the signal
-    //  transitions from loud→quiet, postRms > preRms (the output is the delayed
-    //  loud block; the input is already quiet), giving a spurious positive GR.
-    //  Peak comparison measures the SAME buffer snapshot before and after — the
-    //  lookahead delay shifts the content but cannot create a larger peak than
-    //  the input provided (limiter can only reduce).
-    //
-    //  GR is reported as a positive value (0 = idle, 4.8 = 4.8 dB of reduction).
-    //  This is the standard VU/gain-reduction convention.
-    float limGrDb = 0.f;
-    float postLimStereoRmsDb = -96.f;
+    // Handle additional cases to return true for stereo output specifically
+    if (mainOutput == juce::AudioChannelSet::stereo() && mainInput == juce::AudioChannelSet::mono())
     {
-        const float peakBefore = bufferPeakLinear(buffer, ns);
-        juce::dsp::AudioBlock<float> b(buffer);
-        limiter_.process(juce::dsp::ProcessContextReplacing<float>(b));
-        const float peakAfter  = bufferPeakLinear(buffer, ns);
-
-        // GR = positive when reducing, 0 when idle
-        // jmax(0) prevents false reduction report from lookahead temporal mismatch
-        if (peakBefore > 1e-9f && peakAfter > 1e-9f)
-            limGrDb = juce::jmax(0.f,
-                        20.f * std::log10(peakBefore) - 20.f * std::log10(peakAfter));
-
-        diagState_.limiterGainDb.store(limGrDb);
-
-        // Also capture stereo-mid RMS of the limiter output for C3
-        postLimStereoRmsDb = stereoMidRmsDb(buffer.getReadPointer(0),
-                                             buffer.getReadPointer(1), ns);
+        return true; // Allow mono input to stereo output as well
     }
 
-    // ── 11. Crossfade — DRY ENTERS HERE ONLY ─────────────────────────────
+    return false; // Return false for any unsupported configurations
+}
+
+//==============================================================================
+void AncientVoicesAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    juce::Logger::writeToLog("Total Input Channels: " + juce::String(getTotalNumInputChannels()));
+    juce::Logger::writeToLog("Total Output Channels: " + juce::String(getTotalNumOutputChannels()));
+
+    if (getTotalNumInputChannels() == 2 && getTotalNumOutputChannels() == 2) {
+        juce::Logger::writeToLog("Initializing for Stereo");
+    } else if (getTotalNumInputChannels() == 1 && getTotalNumOutputChannels() == 1) {
+        juce::Logger::writeToLog("Initializing for Mono");
+    } else {
+        juce::Logger::writeToLog("Unexpected channel configuration detected");
+    }
+
+    this->sampleRate = sampleRate;
+
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate = sampleRate;
+    spec.maximumBlockSize = samplesPerBlock;
+    spec.numChannels = getTotalNumOutputChannels();
+
+    try
     {
-        const float wet  = cache_.mix;
-        const float dry  = 1.f - wet;
-        const float gain = cache_.masterVol * std::pow(10.f, cache_.masterGain / 20.f);
-        for (int ch = 0; ch < no; ++ch) {
-            const float* d = dryBuf_.getReadPointer(juce::jmin(ch, dryBuf_.getNumChannels()-1));
-            float*       o = buffer.getWritePointer(ch);
-            for (int s = 0; s < ns; ++s)
-                o[s] = (o[s] * wet + d[s] * dry) * gain;
+        if (sampleRate <= 0)
+        {
+            return;
         }
+
+        // Initialize DSP Modules
+        initializeDSPModules(spec);
+
+        // Ensure the output channel count is valid
+        int numOutputChannels = getTotalNumOutputChannels();
+        if (numOutputChannels <= 0)
+        {
+            return;
+        }
+
+        // Ensure the input channel count is valid
+        int numInputChannels = getTotalNumInputChannels();
+        if (numInputChannels <= 0)
+        {
+            return;
+        }
+
+        // Resize and initialize delay lines per channel
+        delayLines.clear();
+        delayLines.resize(numOutputChannels, juce::dsp::DelayLine<float>(2 * sampleRate));
+
+        const float maxAllowedDelayTimeInSeconds = 2.0f;
+        const int maxDelaySamples = static_cast<int>(maxAllowedDelayTimeInSeconds * sampleRate);
+
+        for (int i = 0; i < numOutputChannels; ++i)
+        {
+            delayLines[i].reset();
+            delayLines[i].setMaximumDelayInSamples(maxDelaySamples);
+        }
+
+        maxAllowedDelay = maxAllowedDelayTimeInSeconds;
+
+        // Initialize waveform buffers ensuring correct size
+        waveformBufferSize = std::max(1, samplesPerBlock * 2);
+
+        // Determine if the plugin is running in real-time mode based on typical sample rate values
+        bool isRealTime = (sampleRate == 44100 || sampleRate == 48000);
+        bool lastIsRealTime = isRealTime;
+
+        // Initialize RubberBandStretcher based on real-time or offline settings
+        if (rubberBandStretcher == nullptr || sampleRate != sampleRate || isRealTime != isRealTime)
+        {
+            sampleRate = sampleRate;
+            lastIsRealTime = isRealTime;
+
+            RubberBand::RubberBandStretcher::Options options = RubberBand::RubberBandStretcher::OptionProcessRealTime;
+            if (isRealTime) {
+                options |= RubberBand::RubberBandStretcher::OptionWindowShort;
+            } else {
+                options |= RubberBand::RubberBandStretcher::OptionProcessOffline |
+                           RubberBand::RubberBandStretcher::OptionWindowLong |
+                           RubberBand::RubberBandStretcher::OptionPhaseIndependent;
+            }
+
+            rubberBandStretcher = std::make_unique<RubberBand::RubberBandStretcher>(
+                static_cast<size_t>(sampleRate),
+                numInputChannels,
+                options
+            );
+        }
+
+        // Reset and configure rubberBandStretcher
+        rubberBandStretcher->reset();
+        rubberBandStretcher->setPitchScale(1.0f);
+
+        // Report latency to the host
+        int latencySamples = rubberBandStretcher->getLatency();
+        setLatencySamples(latencySamples);
+
+        // Initialize AbstractFifo for harmonizer buffer
+        harmonizerFifo.setTotalSize(16384);
+        harmonizerBuffer.setSize(numInputChannels, harmonizerFifo.getTotalSize());
+        harmonizerBuffer.clear();
     }
-
-    // ── 12. Contract checks ───────────────────────────────────────────────
+    catch (const std::exception& e)
     {
-        const float outDb    = stereoMidRmsDb(buffer.getReadPointer(0),
-                                               buffer.getReadPointer(1), ns);
-        const bool  hasAudio = dryRmsDb > -60.f;
-        const bool  nanClean = diagState_.C5_noNanInf.load();
-        diagState_.outputRmsDb.store(outDb);
+        //DBG("PrepareToPlay exception: " << e.what());
+    }
+}
 
-        // C1 — Limiter idle
-        //  GR now uses peak convention (positive = reducing).
-        //  Fire threshold: > 0.5 dB of peak reduction for ≥ 5 consecutive blocks.
-        if (limGrDb > 0.5f)
-            limiterConsecBlocks_++;
+
+void AncientVoicesAudioProcessor::adjustForSampleRate(float currentSampleRate)
+{
+    float scalingFactor = (currentSampleRate < 16000.0f) ? 1.0f : (16000.0f / currentSampleRate);
+
+    for (auto& settings : profiles)
+    {
+        settings.reverbAmount *= scalingFactor;
+        settings.delayAmount *= scalingFactor;
+        settings.pitchShiftAmount *= scalingFactor;
+        settings.flangerRate *= scalingFactor;
+        settings.instabilityDepth *= scalingFactor;
+        settings.saturationDrive *= scalingFactor;
+    }
+}
+
+void AncientVoicesAudioProcessor::initializeDSPModules(const juce::dsp::ProcessSpec& spec)
+{
+    try {
+        resetDSPModules();
+
+        // Initialize Reverb with fully wet settings
+        juce::dsp::Reverb::Parameters reverbParams;
+        reverbParams.roomSize = 0.6f;
+        reverbParams.damping = 0.5f;
+        reverbParams.width = 1.0f;
+        reverbParams.wetLevel = 1.0f;   // 100% wet
+        reverbParams.dryLevel = 0.0f;   // 0% dry
+        reverb.setParameters(reverbParams);
+        reverb.prepare(spec);
+
+        // Prepare other DSP modules with fully wet configurations
+        chorus.setMix(1.0f);             // 100% wet for chorus
+        chorus.prepare(spec);
+
+        flanger.setMix(1.0f);            // 100% wet for flanger
+        flanger.prepare(spec);
+
+        // Modules without wet/dry mix: Prepare as usual, assuming full processing
+        distortion.prepare(spec);
+        compressor.prepare(spec);
+        limiter.prepare(spec);
+
+        // Additional modules as needed
+    }
+    catch (const std::exception& e)
+    {
+        // Log exceptions if debugging
+    }
+}
+
+
+void AncientVoicesAudioProcessor::resetDSPModules()
+{
+    // Reset all DSP modules to their default state
+    reverb.reset();
+    distortion.reset();
+    chorus.reset();
+    flanger.reset();
+    compressor.reset();
+    limiter.reset();
+
+    // Reset delay lines
+    for (auto& delayLine : delayLines)
+    {
+        delayLine.reset();
+    }
+}
+
+//==============================================================================
+void AncientVoicesAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+{
+    juce::ScopedNoDenormals noDenormals;
+    const int numInputChannels = getTotalNumInputChannels();
+    const int numOutputChannels = getTotalNumOutputChannels();
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+
+    try {
+        if (numSamples <= 0 || numOutputChannels <= 0)
+            return;
+
+        // Scrub NaNs
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            auto* channelData = buffer.getWritePointer(channel);
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            {
+                if (!std::isfinite(channelData[i]))
+                    channelData[i] = 0.0f;
+            }
+        }
+
+        // Clear unused output channels
+        for (int i = numInputChannels; i < numOutputChannels; ++i)
+            buffer.clear(i, 0, numSamples);
+
+        juce::dsp::AudioBlock<float> audioBlock(buffer);
+        juce::dsp::ProcessContextReplacing<float> context(audioBlock);
+
+        // Read profile index from APVTS — exactly as MMV
+        int newProfileIndex = 0;
+        if (auto profileParam = apvts.getRawParameterValue("PROFILE_INDEX"))
+            newProfileIndex = profileParam->load();
+
+        profileIndex = newProfileIndex;
+
+        if (profileIndex >= 0 && profileIndex < 50)
+            currentProfile = profiles[juce::jlimit(0, 49, profileIndex)];
         else
-            limiterConsecBlocks_ = 0;
-        diagState_.limiterConsecBlocks.store(float(limiterConsecBlocks_));
-        diagState_.C1_limiterIdle.store(limiterConsecBlocks_ < 5);
+            currentProfile = profiles[0];
 
-        // C2 — Wet within 6 dB of dry (stereo-mid, step 5, before reverb/chorus)
-        //  Suppressed when NaN present — NaN in dry makes dryRmsDb = -96, false alarm.
-        if (hasAudio && nanClean)
-            diagState_.C2_wetWithin6dB.store(std::abs(wetRmsDb - dryRmsDb) <= 6.f);
+        // Apply effects — exactly as MMV
+        applyProfileEffects(buffer);
+        applyLimiter(buffer);
+        applyNoiseReduction(buffer, 0.5);
+    }
+    catch (const std::exception& e)
+    {
+        //DBG("ProcessBlock exception: " << e.what());
+    }
+}
 
-        // C3 — No dry in wet path at mix=1
-        //  Expected output = postLimiter(stereo-mid) + masterGain.
-        //  Deviation > ±1.5 dB at mix=1 indicates dry leaking through the
-        //  formant filter or an error in the crossfade step.
-        if (hasAudio && nanClean && cache_.mix > 0.99f) {
-            const float expectedGainDb = 20.f * std::log10(juce::jmax(0.001f, cache_.masterVol))
-                                       + cache_.masterGain;
-            const float leakDb = outDb - (postLimStereoRmsDb + expectedGainDb);
-            diagState_.dryLeakDb.store(leakDb);
-            diagState_.C3_noDryLeak.store(std::abs(leakDb) < 1.5f);
+//==============================================================================
+void AncientVoicesAudioProcessor::initializeProfiles()
+{
+    for (int i = 0; i < AncientVoices::kNumPresets; ++i)
+    {
+        const auto& p = AncientVoices::kFactoryPresets[i];
+
+        profiles[i] = {
+            // pitchShiftAmount — full interval when shimmer active
+            (p.shimmerMix > 0.05f) ? juce::jlimit(-12.f, 12.f, p.interval) : 0.f,
+            // harmonizerAmount — on when 2+ voices (was 3+)
+            (p.numVoices >= 2) ? 1.0f : 0.0f,
+            // reverbAmount — doubled: caveMix * (0.6 + caveSize*0.4) gives fuller cave
+            juce::jlimit(0.f, 1.f, p.caveMix * (0.6f + p.caveSize * 0.4f)),
+            // distortionAmount — doubled from 0.3x to 0.6x
+            p.roughness * 0.6f,
+            // delayAmount — doubled from 0.12 to 0.24
+            (std::fabsf(p.interval) > 1.f) ? 0.24f : 0.0f,
+            // chorusDepth — doubled from 0.2 to 0.4
+            0.4f,
+            // flangerRate — doubled from 0.2x to 0.4x
+            p.chant * 0.4f,
+            // filterCutoff — era-specific, unchanged
+            (p.era == 0) ? 4500.f : (p.era == 1) ? 5000.f : 5500.f,
+            // compressionRatio — unchanged
+            2.0f,
+            // instabilityDepth — doubled from 0.2x to 0.4x
+            p.drift * 0.4f,
+            // vocalDoublerDetuneAmount — doubled from 0.015x to 0.03x
+            juce::jlimit(0.f, 0.15f, p.numVoices * 0.03f),
+            // vocalDoublerDelayMs — doubled from 12 to 20
+            20.0f,
+            // spacedOutDelayTimeMs — doubled from 25x to 50x
+            p.spread * 50.0f,
+            // spacedOutPanAmount — full spread value
+            p.spread,
+            // glitchAmount — still 0
+            0.0f,
+            // outputGain — keep at 0.9
+            0.9f,
+            // stopAndGoInterval
+            0,
+            // stopAndGoSilenceRatio
+            0.0f,
+            // stutterRepeatLength
+            0,
+            // reverseInterval
+            0,
+            // saturationDrive — raised from 0.7x to 1.0x
+            p.breathe * 1.0f,
+            // saturationMix — raised from 0.7x to 1.0x
+            p.breathe * 1.0f,
+            // saturationTone
+            0.5f
+        };
+    }
+}
+
+//==============================================================================
+void AncientVoicesAudioProcessor::applyFactoryPreset(int presetIndex)
+{
+    if (presetIndex < 0 || presetIndex >= AncientVoices::kNumPresets)
+        return;
+
+    const auto& p = AncientVoices::kFactoryPresets[presetIndex];
+
+    // Update the APVTS parameters to match preset values
+    if (auto* param = apvts.getParameter("PROFILE_INDEX"))
+        param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(presetIndex)));
+
+    if (auto* param = apvts.getParameter("ERA"))
+        param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(p.era)));
+    if (auto* param = apvts.getParameter("VOICE_MODE"))
+        param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(p.voiceMode)));
+    if (auto* param = apvts.getParameter("NUM_VOICES"))
+        param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(p.numVoices)));
+    if (auto* param = apvts.getParameter("SPREAD"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.spread));
+    if (auto* param = apvts.getParameter("DRIFT"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.drift));
+    if (auto* param = apvts.getParameter("CHANT"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.chant));
+    if (auto* param = apvts.getParameter("FORMANT_DEPTH"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.formantDepth));
+    if (auto* param = apvts.getParameter("MIX"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.mix));
+    if (auto* param = apvts.getParameter("CAVE_MIX"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.caveMix));
+    if (auto* param = apvts.getParameter("CAVE_SIZE"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.caveSize));
+    if (auto* param = apvts.getParameter("SHIMMER_MIX"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.shimmerMix));
+    if (auto* param = apvts.getParameter("BREATHE"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.breathe));
+    if (auto* param = apvts.getParameter("ROUGHNESS"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.roughness));
+    if (auto* param = apvts.getParameter("INTERVAL"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.interval));
+
+    // Also directly set currentProfile from the profiles array
+    currentProfile = profiles[presetIndex];
+}
+
+//==============================================================================
+void AncientVoicesAudioProcessor::loadCurrentProfileFromParams()
+{
+    // Read live parameter values from APVTS
+    int era       = static_cast<int>(apvts.getRawParameterValue("ERA")->load());
+    int numVoices = static_cast<int>(apvts.getRawParameterValue("NUM_VOICES")->load());
+    float spread     = apvts.getRawParameterValue("SPREAD")->load();
+    float drift      = apvts.getRawParameterValue("DRIFT")->load();
+    float chant      = apvts.getRawParameterValue("CHANT")->load();
+    float caveMix    = apvts.getRawParameterValue("CAVE_MIX")->load();
+    float caveSize   = apvts.getRawParameterValue("CAVE_SIZE")->load();
+    float shimmerMix = apvts.getRawParameterValue("SHIMMER_MIX")->load();
+    float breathe    = apvts.getRawParameterValue("BREATHE")->load();
+    float roughness  = apvts.getRawParameterValue("ROUGHNESS")->load();
+    float interval   = apvts.getRawParameterValue("INTERVAL")->load();
+    float outputGainDb = apvts.getRawParameterValue("OUTPUT_GAIN")->load();
+
+    // Apply the same mapping table as initializeProfiles()
+    currentProfile.pitchShiftAmount     = (shimmerMix > 0.05f) ? juce::jlimit(-12.f, 12.f, interval) : 0.f;
+    currentProfile.harmonizerAmount     = (numVoices >= 2) ? 1.0f : 0.0f;
+    currentProfile.reverbAmount         = juce::jlimit(0.f, 1.f, caveMix * (0.6f + caveSize * 0.4f));
+    currentProfile.distortionAmount     = roughness * 0.6f;
+    currentProfile.delayAmount          = (std::fabsf(interval) > 1.f) ? 0.24f : 0.0f;
+    currentProfile.chorusDepth          = 0.4f;
+    currentProfile.flangerRate          = chant * 0.4f;
+    currentProfile.filterCutoff         = (era == 0) ? 4500.f : (era == 1) ? 5000.f : 5500.f;
+    currentProfile.compressionRatio     = 2.0f;
+    currentProfile.instabilityDepth     = drift * 0.4f;
+    currentProfile.vocalDoublerDetuneAmount = juce::jlimit(0.f, 0.15f, numVoices * 0.03f);
+    currentProfile.vocalDoublerDelayMs  = 20.0f;
+    currentProfile.spacedOutDelayTimeMs = spread * 50.0f;
+    currentProfile.spacedOutPanAmount   = spread;
+    currentProfile.glitchAmount         = 0.0f;
+    currentProfile.outputGain           = juce::Decibels::decibelsToGain(outputGainDb);
+    currentProfile.stopAndGoInterval    = 0;
+    currentProfile.stopAndGoSilenceRatio = 0.0f;
+    currentProfile.stutterRepeatLength  = 0;
+    currentProfile.reverseInterval      = 0;
+    currentProfile.saturationDrive      = breathe * 1.0f;
+    currentProfile.saturationMix        = breathe * 1.0f;
+    currentProfile.saturationTone       = 0.5f;
+}
+
+//==============================================================================
+// ALL DSP FUNCTIONS BELOW ARE VERBATIM FROM MMV — DO NOT MODIFY
+//==============================================================================
+
+void AncientVoicesAudioProcessor::applyProfileEffects(juce::AudioBuffer<float>& buffer)
+{
+    //DBG("Starting applyProfileEffects...");
+
+    try
+    {
+        // Ensure buffer has samples
+        if (buffer.getNumSamples() == 0)
+               {
+                   //DBG("Buffer is empty, exiting applyProfileEffects.");
+                   return;
+               }
+
+               const int numChannels = buffer.getNumChannels();
+               const double sampleRate = getSampleRate();
+
+               //DBG("Number of Channels: " << numChannels);
+               //DBG("Sample Rate: " << sampleRate);
+
+               if (sampleRate <= 0.0 || numChannels <= 0)
+               {
+                   //DBG("Invalid sample rate or number of channels, exiting.");
+                   return;
+               }
+
+               // Initialize RubberBand stretcher if not done already
+               if (rubberBandStretcher == nullptr)
+               {
+                   rubberBandStretcher = std::make_unique<RubberBand::RubberBandStretcher>(sampleRate, numChannels);
+                   //DBG("Initialized RubberBand stretcher.");
+               }
+
+               // Ensure pitch shift amount is within expected bounds
+               float pitchShiftAmount = currentProfile.pitchShiftAmount;
+               //DBG("Pitch Shift Amount: " << pitchShiftAmount);
+               if (pitchShiftAmount < -12.0f || pitchShiftAmount > 12.0f)
+               {
+                   //DBG("Pitch shift amount out of range, returning.");
+                   return;
+               }
+
+               // Process pitch shifting
+               //DBG("Applying Pitch Shift...");
+               applyRubberBandPitchShift(buffer, pitchShiftAmount);
+
+        // Harmonizer effect: Only applied if the harmonizer amount is greater than 0
+        //DBG("Starting applyProfileEffects...Harmonizer Effect");
+        if (currentProfile.harmonizerAmount > 0.0f)
+        {
+            //DBG("Applying harmony effect with amount: " << currentProfile.harmonizerAmount);
+            const int numSamples = buffer.getNumSamples();
+
+            // Check if rubberBandStretcher is initialized and available for harmony effect
+            if (rubberBandStretcher != nullptr)
+            {
+                size_t availableSamples = rubberBandStretcher->available();
+                //DBG("rubberBandStretcher available samples: " << availableSamples);
+
+                if (availableSamples >= static_cast<size_t>(numSamples))
+                {
+                    applyHarmonization(buffer, currentProfile.harmonizerAmount);
+                    //DBG("Finished applying harmonization.");
+                }
+                else
+                {
+                    //DBG("Skipping harmony effect due to insufficient processed audio.");
+                }
+            }
+            else
+            {
+                //DBG("Error: rubberBandStretcher is null.");
+            }
+        }
+        else
+        {
+            //DBG("Skipping harmony effect because amount is 0.");
         }
 
-        // C4 — NormGain not pegged at ceiling (kNormMax = 20.0)
-        diagState_.C4_normGainSane.store(diagState_.normGainMax.load() < 18.f);
-    }
+        // Distortion effect: Adds grit or overdrive to the signal
+        if (currentProfile.distortionAmount > 0.0f)
+        {
+            //DBG("Applying distortion with amount: " << currentProfile.distortionAmount);
+            applyDistortionEffect(buffer, currentProfile.distortionAmount);
+        }
+        else
+        {
+            //DBG("Skipping distortion because amount is 0.");
+        }
 
-    // ── Scope feed — lock-free AbstractFifo write ─────────────────────────
+        // Compression: Controls dynamics by reducing louder parts of the audio
+        if (currentProfile.compressionRatio > 0.0f)
+        {
+            //DBG("Applying compression with ratio: " << currentProfile.compressionRatio);
+            applyCompressionEffect(buffer, currentProfile.compressionRatio);
+        }
+        else
+        {
+            //DBG("Skipping compression because ratio is 0.");
+        }
+
+        // Chorus effect: Adds depth and thickness by modulating delayed copies of the signal
+        if (currentProfile.chorusDepth > 0.0f)
+        {
+            //DBG("Applying chorus with depth: " << currentProfile.chorusDepth);
+            applyChorusEffect(buffer, currentProfile.chorusDepth);
+        }
+        else
+        {
+            //DBG("Skipping chorus because depth is 0.");
+        }
+
+        // Flanger effect: Adds a sweeping or swirling sound to the audio
+        if (currentProfile.flangerRate > 0.0f)
+        {
+            //DBG("Applying flanger with rate: " << currentProfile.flangerRate);
+            applyFlangerEffect(buffer, currentProfile.flangerRate);
+        }
+        else
+        {
+            //DBG("Skipping flanger because rate is 0.");
+        }
+
+        // Delay effect: Creates echoes by feeding delayed versions of the signal back into the audio
+        if (currentProfile.delayAmount > 0.0f)
+        {
+            //DBG("Applying delay with amount: " << currentProfile.delayAmount);
+            applyDelayEffect(buffer, currentProfile.delayAmount);
+        }
+        else
+        {
+            //DBG("Skipping delay because amount is 0.");
+        }
+
+        // Reverb: Adds space and depth by simulating room reflections
+        if (currentProfile.reverbAmount > 0.0f)
+        {
+            //DBG("Applying reverb with amount: " << currentProfile.reverbAmount);
+            applyReverbEffect(buffer, currentProfile.reverbAmount);
+        }
+        else
+        {
+            //DBG("Skipping reverb because amount is 0.");
+        }
+
+        // New Effects
+
+        // Instability: Adds slight random modulation for a natural feel
+        if (currentProfile.instabilityDepth > 0.0f)
+        {
+            //DBG("Applying instability with depth: " << currentProfile.instabilityDepth);
+            applyInstabilityEffect(buffer, currentProfile.instabilityDepth);
+        }
+
+        // Vocal Doubler: Adds doubling effect using detuning and slight delay
+        if (currentProfile.vocalDoublerDetuneAmount > 0.0f || currentProfile.vocalDoublerDelayMs > 0.0f)
+        {
+            //DBG("Applying vocal doubler with detune amount: " << currentProfile.vocalDoublerDetuneAmount
+               // << " and delay: " << currentProfile.vocalDoublerDelayMs << "ms");
+            applyVocalDoublerEffect(buffer, currentProfile.vocalDoublerDetuneAmount, currentProfile.vocalDoublerDelayMs);
+        }
+
+        // Spaced Out Effect: Panning and delay for an ambient, wide-spaced sound
+        if (currentProfile.spacedOutDelayTimeMs > 0.0f || currentProfile.spacedOutPanAmount > 0.0f)
+        {
+            //DBG("Applying spaced-out effect with delay time: " << currentProfile.spacedOutDelayTimeMs
+                //<< "ms and pan amount: " << currentProfile.spacedOutPanAmount);
+            applySpacedOutDelay(buffer, currentProfile.spacedOutDelayTimeMs, currentProfile.spacedOutPanAmount);
+        }
+
+        // Glitch Effect: Adds rhythmic interruptions and "glitches" to the audio
+        if (currentProfile.glitchAmount > 0.0f)
+        {
+            //DBG("Applying glitch effect with amount: " << currentProfile.glitchAmount);
+            applyGlitchEffect(buffer, currentProfile.glitchAmount);
+        }
+
+        // Stop-and-Go Effect: Adds pauses by alternating between sound and silence
+        if (currentProfile.stopAndGoInterval > 0)
+        {
+            //DBG("Applying stop-and-go effect with interval: " << currentProfile.stopAndGoInterval
+                //<< " samples and silence ratio: " << currentProfile.stopAndGoSilenceRatio);
+            applyStopAndGoEffect(buffer, currentProfile.stopAndGoInterval, currentProfile.stopAndGoSilenceRatio);
+        }
+
+        // Stutter Effect: Repeats short segments of audio for a rhythmic, percussive effect
+        if (currentProfile.stutterRepeatLength > 0)
+        {
+            //DBG("Applying stutter effect with repeat length: " << currentProfile.stutterRepeatLength << " samples");
+            applyStutterEffect(buffer, currentProfile.stutterRepeatLength);
+        }
+
+        // Reverser Effect: Periodically reverses sections of audio for a unique sound
+        if (currentProfile.reverseInterval > 0)
+        {
+            //DBG("Applying reverser effect with interval: " << currentProfile.reverseInterval << " samples");
+            applyReverserEffect(buffer, currentProfile.reverseInterval);
+        }
+
+        // Apply output gain adjustment to the entire buffer
+        float gain = currentProfile.outputGain;
+        //DBG("Applying gain with amount: " << gain);
+        buffer.applyGain(gain);
+
+        //DBG("Finished applying profile effects.");
+    }
+    catch (const std::exception& e)
     {
-        const float* sL = buffer.getReadPointer(0);
-        const float* sR = no > 1 ? buffer.getReadPointer(1) : sL;
-        int s1, n1, s2, n2;
-        scopeFifo_.prepareToWrite(ns, s1, n1, s2, n2);
-        for (int s = 0; s < n1; ++s)
-            scopeBuf_[s1 + s] = (sL[s] + sR[s]) * 0.5f;
-        for (int s = 0; s < n2; ++s)
-            scopeBuf_[s2 + s] = (sL[n1 + s] + sR[n1 + s]) * 0.5f;
-        scopeFifo_.finishedWrite(n1 + n2);
+        //DBG("Exception in applyProfileEffects: " << e.what());
+    }
+    catch (...)
+    {
+        //DBG("Unknown exception in applyProfileEffects.");
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  PARAM CACHE
-// ─────────────────────────────────────────────────────────────────────────────
-void AncientVoicesProcessor::updateCache()
+static float saturationCurve(float x)
 {
-    auto gf = [&](const char* id) {
-        auto* p = apvts.getRawParameterValue(id); return p ? p->load() : 0.f; };
-    auto gi = [&](const char* id) {
-        auto* p = apvts.getRawParameterValue(id); return p ? int(p->load()) : 0; };
-
-    cache_.vowelPos     = gf(ParamID::kVowelPos);
-    cache_.openness     = gf(ParamID::kVowelOpen);
-    cache_.gender       = gf(ParamID::kGender);
-    cache_.breathe      = gf(ParamID::kBreathe);
-    cache_.roughness    = gf(ParamID::kRoughness);
-    cache_.formantShift = gf(ParamID::kFormantShift);
-    cache_.formantDepth = gf(ParamID::kFormantDepth);
-    cache_.era          = gi(ParamID::kEra);
-    cache_.voiceMode    = gi(ParamID::kVoiceMode);
-    cache_.numCopies    = juce::jlimit(1, kMaxCopies, gi(ParamID::kNumVoices));
-    cache_.spread       = gf(ParamID::kSpread);
-    cache_.drift        = gf(ParamID::kDrift);
-    cache_.interval     = gi(ParamID::kInterval);
-    cache_.mix          = gf(ParamID::kMix);
-    cache_.caveMix      = gf(ParamID::kCaveMix);
-    cache_.caveSize     = gf(ParamID::kCaveSize);
-    cache_.caveDamp     = gf(ParamID::kCaveDamp);
-    cache_.caveEcho     = gf(ParamID::kCaveEcho);
-    cache_.shimmerMix   = gf(ParamID::kShimmerMix);
-    cache_.shimmerAmt   = gf(ParamID::kShimmerAmt);
-    cache_.masterVol    = gf(ParamID::kMasterVol);
-    cache_.masterGain   = gf(ParamID::kMasterGain);
-    cache_.satDrive     = juce::jlimit(0.f, kSatDriveMax, (1.5f - cache_.openness) * kSatScale);
+    return std::tanh(x);  // Use tanh for smooth clipping
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  MODULE UPDATE
-// ─────────────────────────────────────────────────────────────────────────────
-void AncientVoicesProcessor::updateModules()
-{
-    const auto& mp = kModeParams[juce::jlimit(0, 3, cache_.voiceMode)];
-    cache_.effDepth   = juce::jlimit(0.f, 1.f,          cache_.formantDepth * mp.formantDepthMul);
-    cache_.effBwMul   = mp.bwMul;
-    cache_.effChoMix  = juce::jlimit(0.f, 1.f,          kChorusMix          * mp.chorusMixMul);
-    cache_.effSat     = juce::jlimit(0.f, kSatDriveMax, cache_.satDrive     * mp.satDriveMul);
-    cache_.effShimmer = juce::jlimit(0.f, 1.f,          cache_.shimmerMix   * mp.shimmerMixMul);
 
-    const int n = juce::jlimit(1, kMaxCopies, cache_.numCopies);
-    const AncientEra era = AncientEra(juce::jlimit(0, 3, cache_.era));
-    for (int ci = 0; ci < kMaxCopies; ++ci) {
-        copies_[ci].setVowelPos (cache_.vowelPos);
-        copies_[ci].setEra      (era);
-        copies_[ci].setOpenness (cache_.openness);
-        copies_[ci].setGender   (cache_.gender);
-        copies_[ci].setDepth    (cache_.effDepth);
-        copies_[ci].setBwMul    (cache_.effBwMul);
-        copyPan_[ci] = (n > 1)
-            ? ((float(ci) / float(n-1)) * 2.f - 1.f) * cache_.spread
-            : 0.f;
+void AncientVoicesAudioProcessor::applyAdvancedSaturation(juce::AudioBuffer<float>& buffer, float saturationAmount, float mixAmount, float cutoffFreq)
+{
+    //DBG("Starting applySaturationEffect...");
+    const int numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    // Loop through each channel and apply saturation effect
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        float* channelData = buffer.getWritePointer(channel);
+
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            // Soft clipping saturation
+            float cleanSample = channelData[sample];
+            float saturatedSample = cleanSample * (1.0f + saturationAmount);
+
+            // Apply a soft clipping curve to prevent harshness
+            if (saturatedSample > 1.0f) saturatedSample = 1.0f - (1.0f / saturatedSample);
+            else if (saturatedSample < -1.0f) saturatedSample = -1.0f + (1.0f / saturatedSample);
+
+            // Wet/Dry mix
+            channelData[sample] = (mixAmount * saturatedSample) + ((1.0f - mixAmount) * cleanSample);
+        }
     }
-    humanizer_.setDrift(cache_.drift);
-    { auto* p = apvts.getRawParameterValue(ParamID::kChant);
-      humanizer_.setChant(p ? p->load() : 0.f); }
 
-    chorus_.setMix        (cache_.effChoMix);
-    chorus_.setDepth      (juce::jlimit(0.f, 0.99f, cache_.drift * kChorusDepthScale));
-    chorus_.setRate       (kChorusRateBase + cache_.drift * kChorusRateScale);
-    chorus_.setCentreDelay(kChorusCentreMs);
+    // Low-pass filter to smooth harsh high frequencies
+    juce::dsp::IIR::Filter<float> lowPassFilter;
+    juce::dsp::IIR::Coefficients<float>::Ptr filterCoefficients = juce::dsp::IIR::Coefficients<float>::makeLowPass(getSampleRate(), cutoffFreq);
+    lowPassFilter.coefficients = filterCoefficients;
+    lowPassFilter.reset();
 
-    reverb_.setMix     (cache_.caveMix);
-    reverb_.setSize    (cache_.caveSize);
-    reverb_.setDamp    (cache_.caveDamp);
-    reverb_.setPreDelay(cache_.caveEcho);
+    juce::dsp::AudioBlock<float> audioBlock(buffer);
+    juce::dsp::ProcessContextReplacing<float> context(audioBlock);
+    lowPassFilter.process(context);
+
+    //DBG("Saturation effect applied with saturationAmount: " << saturationAmount << ", mixAmount: " << mixAmount << ", cutoffFreq: " << cutoffFreq);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  SHIMMER
-// ─────────────────────────────────────────────────────────────────────────────
-void AncientVoicesProcessor::initShimmer(double sr, int ch)
+void AncientVoicesAudioProcessor::performPitchShifting(juce::AudioBuffer<float>& buffer, float shiftAmount)
 {
-    if (shimmerRB_ && shimmerLastSR_ == sr && shimmerLastCh_ == ch) return;
-    shimmerRB_ = std::make_unique<RubberBand::RubberBandStretcher>(
-        size_t(sr), size_t(ch),
-        RubberBand::RubberBandStretcher::OptionProcessRealTime |
-        RubberBand::RubberBandStretcher::OptionPitchHighSpeed);
-    shimmerRB_->setPitchScale(2.0);
-    shimmerLastSR_ = sr; shimmerLastCh_ = ch;
-}
+    // Advanced phase vocoder pitch shifting implementation
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    float pitchShiftFactor = std::pow(2.0f, shiftAmount / 12.0f);
 
-void AncientVoicesProcessor::applyShimmer(juce::AudioBuffer<float>& buffer)
-{
-    if (cache_.effShimmer < 0.001f || !shimmerRB_) return;
-    const int ns = buffer.getNumSamples();
-    const int ch = buffer.getNumChannels();
-    const float pitch = kShimmerPitchMin + cache_.shimmerAmt * (kShimmerPitchMax - kShimmerPitchMin);
-    shimmerRB_->setPitchScale(double(pitch));
-    shimmerRB_->process(buffer.getArrayOfReadPointers(), size_t(ns), false);
-    int avail = juce::jmin(shimmerRB_->available(), ns);
-    if (avail <= 0) return;
-    shimmerBuf_.setSize(ch, avail, false, false, true);
-    shimmerRB_->retrieve(shimmerBuf_.getArrayOfWritePointers(), size_t(avail));
-    const float wet = cache_.effShimmer, dry = 1.f - wet;
-    for (int c = 0; c < ch; ++c) {
-        float* d = buffer.getWritePointer(c);
-        const float* s = shimmerBuf_.getReadPointer(c);
-        for (int i = 0; i < avail; ++i) d[i] = d[i] * dry + s[i] * wet;
+    // Ensure that the FFT buffer can handle the number of channels
+    fftBuffer.setSize(numChannels, fftSize * 2, false, true, true);
+    overlapBuffer.setSize(numChannels, fftSize, false, true, true);
+    
+    // Buffers for magnitude and phase
+    std::vector<std::vector<float>> magnitudes(numChannels, std::vector<float>(fftSize / 2));
+    std::vector<std::vector<float>> phases(numChannels, std::vector<float>(fftSize / 2));
+    std::vector<std::vector<float>> prevPhases(numChannels, std::vector<float>(fftSize / 2, 0.0f));
+    std::vector<std::vector<float>> synthPhases(numChannels, std::vector<float>(fftSize / 2, 0.0f));
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        int bufferPos = 0;
+        while (bufferPos + fftSize < numSamples)
+        {
+            // Copy samples to FFT buffer
+            juce::FloatVectorOperations::copy(fftBuffer.getWritePointer(channel),
+                                              buffer.getReadPointer(channel, bufferPos),
+                                              fftSize);
+
+            // Apply window function
+            windowFunction.multiplyWithWindowingTable(fftBuffer.getWritePointer(channel), fftSize);
+
+            // Perform FFT
+            fft.performRealOnlyForwardTransform(fftBuffer.getWritePointer(channel));
+
+            // Analyze magnitude and phase
+            for (int i = 0; i < fftSize / 2; ++i)
+            {
+                float real = fftBuffer.getSample(channel, 2 * i);
+                float imag = fftBuffer.getSample(channel, 2 * i + 1);
+
+                magnitudes[channel][i] = std::sqrt(real * real + imag * imag);
+                phases[channel][i] = std::atan2(imag, real);
+            }
+
+            // Phase vocoder processing
+            for (int i = 0; i < fftSize / 2; ++i)
+            {
+                // Calculate phase differences
+                float phaseDiff = phases[channel][i] - prevPhases[channel][i];
+                prevPhases[channel][i] = phases[channel][i];
+
+                // Unwrap phase
+                phaseDiff -= hopSize * 2.0f * juce::MathConstants<float>::pi * i / fftSize;
+                phaseDiff = std::fmod(phaseDiff + juce::MathConstants<float>::pi, 2.0f * juce::MathConstants<float>::pi) - juce::MathConstants<float>::pi;
+
+                // Calculate true frequency
+                float trueFreq = 2.0f * juce::MathConstants<float>::pi * i / fftSize + phaseDiff / hopSize;
+
+                // Accumulate phases
+                synthPhases[channel][i] += hopSize * trueFreq * pitchShiftFactor;
+            }
+
+            // Synthesize new FFT bins
+            for (int i = 0; i < fftSize / 2; ++i)
+            {
+                int newIndex = int(i / pitchShiftFactor);
+                if (newIndex < fftSize / 2)
+                {
+                    float magnitude = magnitudes[channel][newIndex];
+                    float phase = synthPhases[channel][newIndex];
+
+
+                    fftBuffer.setSample(channel, 2 * i, magnitude * std::cos(phase));
+                    fftBuffer.setSample(channel, 2 * i + 1, magnitude * std::sin(phase));
+                }
+                else
+                {
+                    fftBuffer.setSample(channel, 2 * i, 0.0f);
+                    fftBuffer.setSample(channel, 2 * i + 1, 0.0f);
+                }
+            }
+
+            // Perform inverse FFT
+            fft.performRealOnlyInverseTransform(fftBuffer.getWritePointer(channel));
+
+            // Overlap-add
+            for (int i = 0; i < fftSize; ++i)
+            {
+                float sample = fftBuffer.getSample(channel, i);
+                overlapBuffer.setSample(channel, (overlapPosition + i) % fftSize,
+                                        overlapBuffer.getSample(channel, (overlapPosition + i) % fftSize) + sample);
+            }
+
+            // Copy to output buffer
+            buffer.copyFrom(channel, bufferPos, overlapBuffer, channel, overlapPosition, hopSize);
+
+            // Clear the used portion of overlap buffer
+            for (int i = 0; i < hopSize; ++i)
+            {
+                overlapBuffer.setSample(channel, (overlapPosition + i) % fftSize, 0.0f);
+            }
+
+            // Update positions
+            bufferPos += hopSize;
+            overlapPosition = (overlapPosition + hopSize) % fftSize;
+        }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  BOILERPLATE
-// ─────────────────────────────────────────────────────────────────────────────
-bool AncientVoicesProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+void AncientVoicesAudioProcessor::applyRepeaterEffect(juce::AudioBuffer<float>& buffer, float repeaterAmount)
 {
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo()) return false;
-    const auto in = layouts.getMainInputChannelSet();
-    return in == juce::AudioChannelSet::stereo() || in == juce::AudioChannelSet::mono();
+    //DBG("Applying Enhanced Repeater Effect with repeaterAmount: " << repeaterAmount);
+
+    const int numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+    const double sampleRate = getSampleRate();
+
+    // Calculate delay based on tempo and repeater amount
+    double bpm = getTempo();
+    if (bpm <= 0.0)
+        bpm = 120.0; // Default tempo
+
+    double beatDuration = 60.0 / bpm;
+    int delaySamples = static_cast<int>(sampleRate * beatDuration * repeaterAmount);
+    const float decayFactor = 0.6f; // Decay per repeat
+    int repeats = juce::jlimit(2, 6, static_cast<int>(repeaterAmount * 6)); // Repeat 2 to 6 times
+
+    juce::AudioBuffer<float> delayBuffer(numChannels, numSamples + delaySamples * repeats);
+    delayBuffer.clear();
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        delayBuffer.copyFrom(channel, 0, buffer, channel, 0, numSamples);
+    }
+
+    // Add repeats with slight pitch shifts for variety
+    for (int repeat = 1; repeat <= repeats; ++repeat)
+    {
+        int delayOffset = delaySamples * repeat;
+        float repeatGain = powf(decayFactor, repeat);
+
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            float* delayData = delayBuffer.getWritePointer(channel);
+            const float* sourceData = buffer.getReadPointer(channel);
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                int delayedIndex = i + delayOffset;
+                if (delayedIndex >= delayBuffer.getNumSamples())
+                    break;
+
+                // Add slight pitch modulation for musical effect
+                float pitchShiftFactor = 1.0f + (repeat * 0.02f * repeaterAmount);
+                delayData[delayedIndex] += sourceData[i] * repeatGain * pitchShiftFactor;
+            }
+        }
+    }
+
+    // Mix delay buffer back into the main buffer
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        buffer.addFrom(channel, 0, delayBuffer, channel, 0, numSamples, 1.0f);
+    }
+
+    //DBG("Enhanced Repeater Effect Applied.");
 }
 
-void AncientVoicesProcessor::getStateInformation(juce::MemoryBlock& dest)
-{ copyXmlToBinary(*apvts.copyState().createXml(), dest); }
-
-void AncientVoicesProcessor::setStateInformation(const void* data, int size)
+void AncientVoicesAudioProcessor::applyDistortionEffect(juce::AudioBuffer<float>& buffer, float distortionAmount)
 {
-    auto xml = getXmlFromBinary(data, size);
-    if (xml && xml->hasTagName(apvts.state.getType())) {
-        apvts.replaceState(juce::ValueTree::fromXml(*xml));
-        stateRestorePending_.store(true);
+    if (distortionAmount <= 0.0f)
+        return; // Skip distortion if amount is zero
+
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+
+    // Scale the distortionAmount to make the effect more noticeable
+    float drive = distortionAmount * 10.0f; // Increased scaling factor
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        float* channelData = buffer.getWritePointer(channel);
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            // Apply distortion function
+            float x = channelData[sample] * drive;
+            channelData[sample] = std::tanh(x); // Soft clipping distortion
+        }
     }
 }
 
-juce::AudioProcessorEditor* AncientVoicesProcessor::createEditor()
-{ return new AncientVoicesEditor(*this); }
+//---------------------------- PITCH SHIFTING ------------------------
 
-const juce::String AncientVoicesProcessor::getName() const { return "Ancient Voices"; }
+#include <rubberband/RubberBandStretcher.h>
+// Assuming RubberBand is included and initialized properly in your project
+void AncientVoicesAudioProcessor::applyRubberBandPitchShift(juce::AudioBuffer<float>& buffer, float pitchShiftAmount)
+{
+    static double lastSampleRate = getSampleRate();
+    static int lastChannelCount = buffer.getNumChannels();
 
+    try
+    {
+        //DBG("Starting applyRubberBandPitchShift...");
+        
+        // Check buffer validity
+        if (buffer.getNumSamples() <= 0 || buffer.getNumChannels() <= 0)
+        {
+            //DBG("Invalid buffer: zero samples or channels.");
+            return;
+        }
+
+        // Reinitialize RubberBandStretcher if sample rate or channel count has changed
+        if (!rubberBandPitchShifter || lastSampleRate != getSampleRate() || lastChannelCount != buffer.getNumChannels())
+        {
+            //DBG("Reinitializing RubberBandStretcher due to sample rate or channel count change.");
+            rubberBandPitchShifter = std::make_unique<RubberBand::RubberBandStretcher>(
+                getSampleRate(),
+                buffer.getNumChannels(),
+                RubberBand::RubberBandStretcher::OptionProcessRealTime | RubberBand::RubberBandStretcher::OptionPitchHighQuality
+            );
+
+            // Update last known values
+            lastSampleRate = getSampleRate();
+            lastChannelCount = buffer.getNumChannels();
+        }
+
+        // Set pitch shift scale
+        float pitchScale = std::pow(2.0f, pitchShiftAmount / 12.0f);
+        //DBG("Setting pitch scale to: " << pitchScale);
+        rubberBandPitchShifter->setPitchScale(pitchScale);
+
+        // Process the audio buffer
+        //DBG("Processing audio buffer with " << buffer.getNumSamples() << " samples.");
+        rubberBandPitchShifter->process(buffer.getArrayOfWritePointers(), buffer.getNumSamples(), false);
+
+        // Retrieve available samples without exceeding buffer size
+        int available = rubberBandPitchShifter->available();
+        //DBG("Available samples: " << available);
+
+        if (available > buffer.getNumSamples())
+        {
+            available = buffer.getNumSamples(); // Limit to buffer size
+        }
+
+        if (available > 0)
+        {
+            //DBG("Retrieving " << available << " samples from RubberBandStretcher.");
+            rubberBandPitchShifter->retrieve(buffer.getArrayOfWritePointers(), available);
+        }
+        else
+        {
+            //DBG("No available samples to retrieve.");
+        }
+
+        //DBG("applyRubberBandPitchShift completed successfully.");
+    }
+    catch (const std::exception& e)
+    {
+        //DBG("Exception in applyRubberBandPitchShift: " << e.what());
+    }
+    catch (...)
+    {
+        //DBG("Unknown exception in applyRubberBandPitchShift.");
+    }
+}
+
+//==============================================================================
+
+void AncientVoicesAudioProcessor::applyDelayEffect(juce::AudioBuffer<float>& buffer, float delayAmount)
+{
+    //DBG("delay called.");
+    if (delayAmount <= 0.0f || delayAmount > maxAllowedDelay)
+        return;
+
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    const int delayInSamples = static_cast<int>(delayAmount * getSampleRate());
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        auto* channelData = buffer.getWritePointer(channel);
+
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            if (delayInSamples <= delayLines[channel].getDelay())
+            {
+                float delayedSample = delayLines[channel].popSample(delayInSamples, true);
+                delayLines[channel].pushSample(channel, channelData[sample]);
+                channelData[sample] = (delayedSample * delayAmount) + (channelData[sample] * (1.0f - delayAmount));
+            }
+        }
+    }
+}
+
+void AncientVoicesAudioProcessor::applyChorusEffect(juce::AudioBuffer<float>& buffer, float depth)
+{
+    //DBG("chorus called.");
+    if (depth <= 0.0f)
+        return;
+
+    chorus.setRate(0.5f);          // Increased LFO rate for more noticeable modulation
+    chorus.setDepth(depth * 0.5f); // Adjust depth scaling as needed
+    chorus.setCentreDelay(15.0f);  // Base delay in ms
+    chorus.setFeedback(0.0f);      // Feedback amount
+    chorus.setMix(0.7f);           // Increased mix for more effect
+
+    // Process chorus
+    juce::dsp::AudioBlock<float> block(buffer);
+    juce::dsp::ProcessContextReplacing<float> context(block);
+    chorus.process(context);
+}
+
+//==============================================================================
+void AncientVoicesAudioProcessor::applyFlangerEffect(juce::AudioBuffer<float>& buffer, float rate)
+{
+    //DBG("flanger called.");
+    if (rate <= 0.0f)
+        return;
+
+    flanger.setRate(rate * 1.0f);          // Adjust LFO rate
+    flanger.setDepth(0.8f);                 // Increased depth for more pronounced effect
+    flanger.setCentreDelay(3.0f);           // Base delay in ms
+    flanger.setFeedback(0.5f);              // Feedback amount
+    flanger.setMix(0.6f);                   // Increased mix
+
+    // Process flanger
+    juce::dsp::AudioBlock<float> block(buffer);
+    juce::dsp::ProcessContextReplacing<float> context(block);
+    flanger.process(context);
+}
+
+//==============================================================================
+void AncientVoicesAudioProcessor::applyCompressionEffect(juce::AudioBuffer<float>& buffer, float ratio)
+{
+    //DBG("compression called.");
+    if (ratio <= 0.0f)
+        return;
+
+    // Apply compression effect
+    compressor.setThreshold(-24.0f);  // Threshold in dB
+    compressor.setRatio(ratio);       // Compression ratio
+    compressor.setAttack(10.0f);      // Attack time in ms
+    compressor.setRelease(100.0f);    // Release time in ms
+
+    // Process compressor
+    juce::dsp::AudioBlock<float> block(buffer);
+    juce::dsp::ProcessContextReplacing<float> context(block);
+    compressor.process(context);
+}
+
+double AncientVoicesAudioProcessor::getTempo() const
+{
+    if (auto* playHead = getPlayHead())
+    {
+        if (auto position = playHead->getPosition())
+        {
+            if (auto bpm = position->getBpm())
+            {
+                return *bpm;
+            }
+        }
+    }
+    return 120.0;  // Default to 120 BPM if no tempo is available
+}
+
+//------------------------------------------------- REPEATER STUTTER NOISE REDUCTION
+void AncientVoicesAudioProcessor::applyStutterEffect(juce::AudioBuffer<float>& buffer, float stutterAmount)
+{
+    //DBG("Starting Simple Stutter Effect with stutterAmount: " << stutterAmount);
+
+    const int numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+    const double sampleRate = getSampleRate();
+
+    // Calculate stutter length based on stutterAmount with a minimum threshold
+    int stutterLength = std::max(static_cast<int>(sampleRate * stutterAmount), 8); // Minimum of 8 samples
+
+    // Limit stutter length to prevent excessive buffer use
+    stutterLength = juce::jlimit(8, numSamples / 4, stutterLength);
+
+    // Only apply if stutterLength is reasonable
+    if (stutterLength < numSamples)
+    {
+        // Loop over each channel
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            float* channelData = buffer.getWritePointer(channel);
+
+            // Process each segment of the audio buffer
+            for (int position = 0; position < numSamples; position += stutterLength * 3)
+            {
+                // Repeat the stuttered audio chunk to mimic stuttering
+                for (int repeat = 0; repeat < 2; ++repeat)
+                {
+                    int offset = repeat * stutterLength;
+                    if (position + offset + stutterLength < numSamples)
+                    {
+                        // Copy the stutter segment
+                        for (int i = 0; i < stutterLength; ++i)
+                        {
+                            channelData[position + offset + i] = channelData[position + i];
+                        }
+                    }
+                }
+
+                // Apply volume reduction for stutter effect
+                for (int i = 0; i < stutterLength && position + i < numSamples; ++i)
+                {
+                    channelData[position + i] *= 0.8f;  // Reduce volume slightly
+                }
+
+                // Add extended silence if buffer allows
+                if (position + stutterLength * 2 < numSamples)
+                {
+                    for (int i = 0; i < stutterLength && position + stutterLength * 2 + i < numSamples; ++i)
+                    {
+                        channelData[position + stutterLength * 2 + i] = 0.0f;  // Add extended silence
+                    }
+                }
+            }
+        }
+        //DBG("Extended Stutter Effect Applied Successfully.");
+    }
+    else
+    {
+        //DBG("Stutter Length too long for buffer size; effect not applied.");
+    }
+}
+
+void AncientVoicesAudioProcessor::applyNoiseReduction(juce::AudioBuffer<float>& buffer, float reductionThreshold)
+{
+    float noiseReductionThreshold = juce::Decibels::decibelsToGain(-55.0f);  // Around -55 dB
+    float reductionAmount = 0.25f;  // 25% reduction
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        auto* channelData = buffer.getWritePointer(channel);
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            if (std::abs(channelData[sample]) < noiseReductionThreshold)
+            {
+                // Reduce noise smoothly
+                channelData[sample] *= (1.0f - reductionAmount);
+            }
+        }
+    }
+
+    //DBG("Noise reduction applied with threshold at " << reductionThreshold << " and reduction amount: " << reductionAmount);
+}
+
+//-------------------------------------------------------
+
+void AncientVoicesAudioProcessor::applyReverbEffect(juce::AudioBuffer<float>& buffer, float reverbAmount)
+{
+    //DBG("delay called.");
+    if (reverbAmount <= 0.0f)
+        return;
+
+    juce::dsp::Reverb::Parameters reverbParams = reverb.getParameters();
+    reverbParams.wetLevel = reverbAmount * 0.7f; // Increased wet level
+    reverbParams.dryLevel = 1.0f - reverbParams.wetLevel;
+    reverb.setParameters(reverbParams);
+
+    juce::dsp::AudioBlock<float> block(buffer);
+    juce::dsp::ProcessContextReplacing<float> context(block);
+
+    reverb.process(context);
+}
+
+void AncientVoicesAudioProcessor::applyDynamicEQ(juce::AudioBuffer<float>& buffer, int profileIndex)
+{
+    float cutoffLow = 0.0f;
+    float cutoffMid = 0.0f;
+    float cutoffHigh = 0.0f;
+
+    // Define static EQ settings per profile
+    switch (profileIndex)
+    {
+        case 1:  cutoffHigh = 5000.0f;  break;
+        case 2:  cutoffMid = 3000.0f;   break;
+        case 3:  cutoffLow = 800.0f;    break;
+        case 4:  cutoffMid = 2000.0f;   break;
+        case 5:  cutoffHigh = 6000.0f;  break;
+        case 6:  cutoffMid = 3500.0f;   break;
+        case 7:  cutoffMid = 2500.0f;   break;
+        case 8:  cutoffLow = 1500.0f; cutoffMid = 1500.0f; break;
+        case 9:  cutoffHigh = 5500.0f;  break;
+        case 10: cutoffLow = 1200.0f; cutoffMid = 1200.0f; break;
+        case 11: cutoffHigh = 6000.0f;  break;
+        case 12: cutoffLow = 1000.0f; cutoffMid = 1000.0f; break;
+        case 13: cutoffMid = 4000.0f; cutoffHigh = 4000.0f; break;
+        case 14: cutoffHigh = 7000.0f;  break;
+        case 15: cutoffMid = 2500.0f;   break;
+        case 16: cutoffMid = 3000.0f;   break;
+        case 17: cutoffMid = 2500.0f;   break;
+        case 18: cutoffLow = 1000.0f; cutoffMid = 1000.0f; break;
+        case 19: cutoffMid = 4500.0f; cutoffHigh = 4500.0f; break;
+        case 20: cutoffHigh = 6000.0f;  break;
+        case 21: cutoffLow = 800.0f;    break;
+        case 22: cutoffMid = 3500.0f;   break;
+        case 23: cutoffHigh = 5500.0f;  break;
+        case 24: cutoffLow = 700.0f;    break;
+        case 25: cutoffMid = 3500.0f; cutoffHigh = 3500.0f; break;
+        case 26: cutoffLow = 1200.0f;   break;
+        case 27: cutoffHigh = 4000.0f;  break;
+        case 28: cutoffMid = 2500.0f;   break;
+        case 29: cutoffHigh = 5000.0f;  break;
+        case 30: cutoffLow = 1000.0f;   break;
+        default: cutoffMid = 2000.0f;   break;
+    }
+}
+
+void AncientVoicesAudioProcessor::applyFormantShifting(juce::AudioBuffer<float>& buffer, int profileIndex)
+{
+    //DBG("formant shifting called.");
+    float shiftInterval = 0.0f;  // Default: no shift
+
+    switch (profileIndex)
+    {
+        case 1:  shiftInterval = 1.0f;   break;
+        case 2:  shiftInterval = 0.5f;   break;
+        case 3:  shiftInterval = -1.0f;  break;
+        case 4:  shiftInterval = 0.0f;   break;
+        case 5:  shiftInterval = 2.0f;   break;
+        case 6:  shiftInterval = 1.0f;   break;
+        case 7:  shiftInterval = 0.5f;   break;
+        case 8:  shiftInterval = -0.5f;  break;
+        case 9:  shiftInterval = 1.5f;   break;
+        case 10: shiftInterval = -1.0f;  break;
+        case 11: shiftInterval = 2.0f;   break;
+        case 12: shiftInterval = -1.5f;  break;
+        case 13: shiftInterval = 0.5f;   break;
+        case 14: shiftInterval = 2.0f;   break;
+        case 15: shiftInterval = 0.0f;   break;
+        case 16: shiftInterval = 1.0f;   break;
+        case 17: shiftInterval = 0.0f;   break;
+        case 18: shiftInterval = -1.0f;  break;
+        case 19: shiftInterval = 1.5f;   break;
+        case 20: shiftInterval = 1.0f;   break;
+        case 21: shiftInterval = -2.0f;  break;
+        case 22: shiftInterval = 0.5f;   break;
+        case 23: shiftInterval = 1.0f;   break;
+        case 24: shiftInterval = -1.5f;  break;
+        case 25: shiftInterval = 0.5f;   break;
+        case 26: shiftInterval = -1.0f;  break;
+        case 27: shiftInterval = 1.0f;   break;
+        case 28: shiftInterval = 0.5f;   break;
+        case 29: shiftInterval = 1.0f;   break;
+        case 30: shiftInterval = -1.0f;  break;
+        default: break;
+    }
+
+    // Use existing pitch shifting method to handle the shift
+    applyRubberBandPitchShift(buffer, shiftInterval);
+}
+
+//==============================================================================
+bool AncientVoicesAudioProcessor::hasEditor() const { return true; }
+
+juce::AudioProcessorEditor* AncientVoicesAudioProcessor::createEditor()
+{
+    return new AncientVoicesAudioProcessorEditor(*this);
+}
+
+//==============================================================================
+const juce::String AncientVoicesAudioProcessor::getName() const { return JucePlugin_Name; }
+
+bool AncientVoicesAudioProcessor::acceptsMidi() const { return false; }
+bool AncientVoicesAudioProcessor::producesMidi() const { return false; }
+bool AncientVoicesAudioProcessor::isMidiEffect() const { return false; }
+double AncientVoicesAudioProcessor::getTailLengthSeconds() const { return 0.0; }
+
+//==============================================================================
+void AncientVoicesAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+{
+    // Save parameters state using apvts
+    juce::MemoryOutputStream stream(destData, true);
+    apvts.state.writeToStream(stream);
+}
+
+void AncientVoicesAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+{
+    // Load parameters state using apvts
+    juce::ValueTree tree = juce::ValueTree::readFromData(data, size_t (sizeInBytes));
+    if (tree.isValid())
+    {
+        apvts.replaceState(tree);
+    }
+}
+
+void AncientVoicesAudioProcessor::applyHarmonization(juce::AudioBuffer<float>& buffer, float harmonizerAmount)
+{
+    //DBG("Entering applyHarmonization...");
+
+    if (rubberBandStretcher == nullptr)
+    {
+        //DBG("Error: rubberBandStretcher is null.");
+        return;
+    }
+
+    int numSamples = buffer.getNumSamples();
+    int numChannels = buffer.getNumChannels();
+
+    // Define three harmony intervals: major third (4 semitones), perfect fifth (7 semitones), and octave (-12 semitones)
+    std::vector<float> harmonyIntervals = { 4.0f, 7.0f, -12.0f };
+
+    // Prepare input data for RubberBandStretcher
+    std::vector<const float*> inputData(numChannels);
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        inputData[channel] = buffer.getReadPointer(channel);
+    }
+
+    // Process the three harmonies
+    for (float interval : harmonyIntervals)
+    {
+        // Set pitch shift factor for the harmony
+        float pitchFactor = std::pow(2.0f, interval / 12.0f);
+        rubberBandStretcher->setPitchScale(pitchFactor);
+
+        // Process the buffer
+        rubberBandStretcher->process(inputData.data(), numSamples, false);
+
+        // Retrieve the processed samples
+        std::vector<float*> outputData(numChannels);
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            outputData[channel] = buffer.getWritePointer(channel);
+        }
+
+        rubberBandStretcher->retrieve(outputData.data(), numSamples);
+    }
+
+    //DBG("Finished applying harmonization.");
+}
+
+//======================================================================
+void AncientVoicesAudioProcessor::applyLimiter(juce::AudioBuffer<float>& buffer)
+{
+    //DBG("limiter called.");
+    
+    // Check if the buffer has valid samples and channels
+    if (buffer.getNumSamples() == 0 || buffer.getNumChannels() == 0)
+    {
+        //DBG("Warning: Buffer is empty or not initialized. Skipping limiter process.");
+        return;
+    }
+
+    try
+    {
+        // Set the threshold to a reasonable level
+        limiter.setThreshold(-1.0f); // -1 dB
+
+        // Create an audio block from the buffer and process it
+        juce::dsp::AudioBlock<float> block(buffer);
+        juce::dsp::ProcessContextReplacing<float> context(block);
+        limiter.process(context);
+    }
+    catch (const std::exception& e)
+    {
+        //DBG("Limiter processing exception: " << e.what());
+    }
+}
+
+void AncientVoicesAudioProcessor::applyVocalDoublerEffect(juce::AudioBuffer<float>& buffer, float detuneAmount, float delayMs)
+{
+    const int numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+    const double sampleRate = getSampleRate();
+    const int delaySamples = static_cast<int>((delayMs / 1000.0) * sampleRate);
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        float* channelData = buffer.getWritePointer(channel);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            // Apply detune effect (simple pitch shift for vocal doubler)
+            float detunedSample = juce::jmap(detuneAmount, channelData[i], channelData[(i + delaySamples) % numSamples]);
+
+            // Apply delay effect to simulate doubling
+            if (i >= delaySamples)
+            {
+                channelData[i] = (channelData[i] + detunedSample) / 2.0f;
+            }
+        }
+    }
+}
+
+void AncientVoicesAudioProcessor::applySpacedOutDelay(juce::AudioBuffer<float>& buffer, float delayTimeMs, float panAmount)
+{
+    const int numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+    const double sampleRate = getSampleRate();
+    const int delaySamples = static_cast<int>((delayTimeMs / 1000.0) * sampleRate);
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        float* channelData = buffer.getWritePointer(channel);
+        
+        for (int i = 0; i < numSamples; ++i)
+        {
+            // Apply delay with panning
+            if (i >= delaySamples)
+            {
+                float panFactor = (channel == 0) ? (1.0f - panAmount) : (1.0f + panAmount);
+                channelData[i] = channelData[i] + (channelData[i - delaySamples] * panFactor);
+            }
+        }
+    }
+}
+
+void AncientVoicesAudioProcessor::applyInstabilityEffect(juce::AudioBuffer<float>& buffer, float instabilityDepth)
+{
+    const int numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        float* channelData = buffer.getWritePointer(channel);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            // Add random fluctuation to simulate instability
+            float fluctuation = juce::Random::getSystemRandom().nextFloat() * instabilityDepth;
+            channelData[i] *= (1.0f + fluctuation);
+        }
+    }
+}
+
+void AncientVoicesAudioProcessor::applyGlitchEffect(juce::AudioBuffer<float>& buffer, float glitchAmount)
+{
+    const int numChannels = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+    const int glitchStep = static_cast<int>(glitchAmount * 100);
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        float* channelData = buffer.getWritePointer(channel);
+
+        for (int i = 0; i < numSamples; i += glitchStep)
+        {
+            if (juce::Random::getSystemRandom().nextFloat() < glitchAmount)
+            {
+                for (int j = 0; j < glitchStep && i + j < numSamples; ++j)
+                {
+                    channelData[i + j] = 0.0f;  // Apply mute (glitch) in small sections
+                }
+            }
+        }
+    }
+}
+
+void AncientVoicesAudioProcessor::applyReverserEffect(juce::AudioBuffer<float>& buffer, int reverseInterval)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        for (int startSample = 0; startSample < numSamples; startSample += reverseInterval)
+        {
+            int endSample = juce::jmin(startSample + reverseInterval, numSamples);
+            
+            // Reverse the section from startSample to endSample
+            for (int i = 0; i < (endSample - startSample) / 2; ++i)
+            {
+                float temp = buffer.getSample(channel, startSample + i);
+                buffer.setSample(channel, startSample + i, buffer.getSample(channel, endSample - i - 1));
+                buffer.setSample(channel, endSample - i - 1, temp);
+            }
+        }
+    }
+}
+
+void AncientVoicesAudioProcessor::applyStopAndGoEffect(juce::AudioBuffer<float>& buffer, int interval, float silenceRatio)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            int positionInCycle = sample % interval;
+            if (positionInCycle > static_cast<int>(interval * silenceRatio))
+            {
+                // Silence the buffer for the duration of the 'stop' part of the cycle
+                buffer.setSample(channel, sample, 0.0f);
+            }
+        }
+    }
+}
+
+void AncientVoicesAudioProcessor::applyVocalTransitEffect(juce::AudioBuffer<float>& buffer)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+
+    float modulationDepth = 0.3f; // Controls how extreme the variation is
+    juce::Random random;
+
+    // Randomly vary the reverb, pitch, and delay in each block
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        float* channelData = buffer.getWritePointer(channel);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            // Apply random modulation to pitch
+            float pitchMod = 1.0f + (random.nextFloat() - 0.5f) * modulationDepth;
+            channelData[i] *= pitchMod;
+
+            // Randomly modulate reverb
+            float reverbMod = (random.nextFloat() - 0.5f) * modulationDepth;
+            channelData[i] *= (1.0f + reverbMod);
+
+            // Add random delay
+            if (random.nextFloat() < 0.01f) // 1% chance of adding delay
+            {
+                channelData[i] = (i > 50) ? channelData[i - 50] : 0.0f; // Adds a small echo effect
+            }
+        }
+    }
+}
+
+//==============================================================================
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{ return new AncientVoicesProcessor(); }
+{
+    return new AncientVoicesAudioProcessor();
+}

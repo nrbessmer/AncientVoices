@@ -1,188 +1,199 @@
 #pragma once
+
 #include <JuceHeader.h>
+#include <vector>
+#include <complex>
+#include <array>
 #include <atomic>
-#include <random>
+#include <cmath>
+#include <juce_dsp/juce_dsp.h>
 #include <rubberband/RubberBandStretcher.h>
-#include "AncientVoicesConfig.h"
-#include "DSP/FormantFilter.h"
-#include "DSP/CaveReverb.h"
-#include "DSP/HumanizeEngine.h"
-#include "Data/IntervalTables.h"
 #include "Data/Presets.h"
 
-// ═══════════════════════════════════════════════════════════════════
-//  ANCIENT VOICES — DBTF Behavioral Contract
-//
-//  Signal chain — dry enters output ONLY at step 11:
-//    1  Save dry          7  Saturation (inline tanh)
-//    2  Mono sum          8  Shimmer (wet only)
-//    3  Breathe noise     9  Cave reverb
-//    4  N×FormantFilter  10  Limiter
-//    5  Wet boost        11  Crossfade: wet×mix + dry×(1-mix)
-//    6  Chorus           12  Contract checks + scope feed (lock-free)
-// ═══════════════════════════════════════════════════════════════════
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  DIAGNOSTIC STATE — provably correct signal chain monitoring
-//
-//  Five contracts checked every processBlock:
-//
-//    C1  Limiter idle        GR < 0.5 dB for < 5 consecutive blocks
-//    C2  Wet within 6 dB     |wetRms - dryRms| ≤ 6 dB (simulation: ~-1.8 dB)
-//    C3  No dry in wet path  at mix=1, output ≈ postLimiter + masterGain (±1.5 dB)
-//    C4  NormGain sane       normGainMax < 18.0x (ceiling = 20.0x)
-//    C5  No NaN/Inf          sticky — if C5 fails, C2/C3 are suspended (false positives)
-//
-//  Simulation baseline (48 kHz / 2048 block, kWetBoost=1.0):
-//    150 Hz 0.5 amp  → wet -10.8 dBFS / dry -9.0 dBFS / diff -1.8 dB → ALL PASS
-//    0 dBFS input    → limiter GR 0.0 dB                               → ALL PASS
-//    NaN injected    → C5 root cause, C2/C3 suspended (not false alarm)
-//
-//  All fields std::atomic<float> per spec.  Integers stored as float, cast on read.
-// ─────────────────────────────────────────────────────────────────────────────
-struct DiagnosticState
-{
-    // ── Raw measurements (audio thread writes, UI reads at 10 Hz) ─────
-    std::atomic<float> limiterGainDb       { 0.f    };  // GR dB, 0 = limiter idle
-    std::atomic<float> wetRmsDb            { -96.f  };  // wet RMS at step 5 (dBFS)
-    std::atomic<float> dryRmsDb            { -96.f  };  // dry RMS at step 1 (dBFS)
-    std::atomic<float> outputRmsDb         { -96.f  };  // post-crossfade (dBFS)
-    std::atomic<float> wetDryDiffDb        { 0.f    };  // wet - dry (dB)
-    std::atomic<float> mixRatio            { 1.f    };  // mix parameter value
-    std::atomic<float> voiceCount          { 2.f    };  // number of FormantFilter copies
-    std::atomic<float> copyCount           { 2.f    };  // same as voiceCount in this plugin
-    std::atomic<float> normGainMin         { 0.f    };  // min normGain_ across active copies
-    std::atomic<float> normGainMax         { 0.f    };  // max normGain_ across active copies
-    std::atomic<float> sampleRateHz        { 44100.f };
-    std::atomic<float> blockSizeSmps       { 0.f    };
-
-    // ── Contract checks (true = PASS, updated every processBlock) ─────
-    std::atomic<bool>  C1_limiterIdle      { true   };
-    std::atomic<bool>  C2_wetWithin6dB     { true   };
-    std::atomic<bool>  C3_noDryLeak        { true   };
-    std::atomic<bool>  C4_normGainSane     { true   };
-    std::atomic<bool>  C5_noNanInf         { true   };  // sticky: only ever goes false
-
-    // ── Contract detail ───────────────────────────────────────────────
-    std::atomic<float> limiterConsecBlocks { 0.f    };  // consecutive blocks limiter fired
-    std::atomic<float> dryLeakDb           { 0.f    };  // C3: measured deviation (dB)
-};
-
-class AncientVoicesProcessor : public juce::AudioProcessor
+class AncientVoicesAudioProcessor  : public juce::AudioProcessor
 {
 public:
-    static constexpr int kMaxCopies = 8;
+    AncientVoicesAudioProcessor();
+    ~AncientVoicesAudioProcessor() override;
 
-    AncientVoicesProcessor();
-    ~AncientVoicesProcessor() override;
+    // Accessor
+    void applyDynamicEQ(juce::AudioBuffer<float>& buffer, int profileIndex);
+    void applyFormantShifting(juce::AudioBuffer<float>& buffer, int profileIndex);
 
+    //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
-    void processBlock  (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
+   #ifdef JucePlugin_Enable_ARA
+    bool isARACompatible() const { return true; }
+   #endif
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+
+    //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;
-    bool   hasEditor()    const override { return true; }
-    bool   acceptsMidi()  const override { return false; }
-    bool   producesMidi() const override { return false; }
-    bool   isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 4.0; }
-    const  juce::String getName() const override;
+    bool hasEditor() const override;
 
-    int  getNumPrograms()    override { return presets_.count(); }
-    int  getCurrentProgram() override { return presets_.current(); }
-    void setCurrentProgram(int i) override { presets_.apply(i, apvts); }
-    const juce::String getProgramName(int i) override { return presets_.get(i).name; }
-    void changeProgramName(int, const juce::String&) override {}
+    //==============================================================================
+    const juce::String getName() const override;
 
-    void getStateInformation(juce::MemoryBlock&) override;
-    void setStateInformation(const void*, int) override;
-    bool isBusesLayoutSupported(const BusesLayout&) const override;
+    bool acceptsMidi() const override;
+    bool producesMidi() const override;
+    bool isMidiEffect() const override;
+    double getTailLengthSeconds() const override;
 
-    juce::AudioProcessorValueTreeState apvts;
-    AVPresetManager& getPresets() { return presets_; }
+    //==============================================================================
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int index) override {}
+    const juce::String getProgramName (int index) override { return {}; }
+    void changeProgramName (int index, const juce::String& newName) override {}
 
-    // ── Lock-free scope consumer (UI thread only) ──────────────────────
-    bool consumeScope(juce::AudioBuffer<float>& dest)
-    {
-        const int available = scopeFifo_.getNumReady();
-        if (available <= 0) return false;
-        dest.setSize(1, available, false, false, true);
-        float* d = dest.getWritePointer(0);
-        int s1, n1, s2, n2;
-        scopeFifo_.prepareToRead(available, s1, n1, s2, n2);
-        juce::FloatVectorOperations::copy(d,      scopeBuf_ + s1, n1);
-        juce::FloatVectorOperations::copy(d + n1, scopeBuf_ + s2, n2);
-        scopeFifo_.finishedRead(n1 + n2);
-        return true;
-    }
+    //==============================================================================
+    void getStateInformation (juce::MemoryBlock& destData) override;
+    void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // ── Diagnostic state accessor (UI thread reads only) ───────────────
-    const DiagnosticState& getDiagState() const noexcept { return diagState_; }
+    juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameters();
+
+    // Declare maxAllowedDelay as a member variable
+    float maxAllowedDelay;
+
+    // Ancient Voices preset application
+    void applyFactoryPreset(int presetIndex);
+
+    // Rebuild currentProfile from live APVTS parameter values
+    void loadCurrentProfileFromParams();
 
 private:
-    static juce::AudioProcessorValueTreeState::ParameterLayout createParams();
+    // Buffer size for waveform visualization
+    int waveformBufferSize = 2048;
 
-    // ── DSP objects ────────────────────────────────────────────────────
-    FormantFilter  copies_[kMaxCopies];
-    float          copyPan_[kMaxCopies]    = {};
-    float          copyDetune_[kMaxCopies] = {};
-    HumanizeEngine humanizer_;
-    CaveReverb     reverb_;
-    juce::dsp::Chorus<float>  chorus_;
-    juce::dsp::Limiter<float> limiter_;
-    juce::dsp::ProcessSpec    spec_;
+    //==============================================================================
+    // ProfileSettings — 23 fields, IDENTICAL to MMV, in original declaration order
+    struct ProfileSettings
+    {
+        float pitchShiftAmount;             // Pitch shift amount for vocal pitch adjustment
+        float harmonizerAmount;             // Amount of harmonization effect applied
+        float reverbAmount;                 // Amount of reverb for spatial depth
+        float distortionAmount;             // Amount of distortion to add grit
+        float delayAmount;                  // Delay amount for echo effects
+        float chorusDepth;                  // Depth of the chorus effect for richness
+        float flangerRate;                  // Rate of flanger effect for modulation
+        float filterCutoff;                 // Cutoff frequency for tone shaping with filter
+        float compressionRatio;             // Ratio for compression to control dynamics
+        float instabilityDepth;             // Depth of instability effect for slight pitch modulation
+        float vocalDoublerDetuneAmount;     // Detune amount for vocal doubler effect
+        float vocalDoublerDelayMs;          // Delay time in milliseconds for vocal doubler
+        float spacedOutDelayTimeMs;         // Delay time in milliseconds for spaced-out ambiance
+        float spacedOutPanAmount;           // Panning amount for spaced-out effect
+        float glitchAmount;                 // Amount of glitch effect for chopped texture
+        float outputGain;                   // Final gain adjustment for volume control
 
-    // ── Shimmer ────────────────────────────────────────────────────────
-    std::unique_ptr<RubberBand::RubberBandStretcher> shimmerRB_;
-    double shimmerLastSR_ = 0.0;
-    int    shimmerLastCh_ = 0;
+        // Additional attributes for specialized effects
+        int stopAndGoInterval;              // Interval in samples for stop-and-go effect
+        float stopAndGoSilenceRatio;        // Silence ratio for stop-and-go effect
+        int stutterRepeatLength;            // Length of repeated stutter segment in samples
+        int reverseInterval;                // Interval in samples for periodic audio reversal
 
-    // ── Work buffers (prepareToPlay only — never in processBlock) ──────
-    juce::AudioBuffer<float> dryBuf_, workBuf_, monoInBuf_, shimmerBuf_;
-    int maxBlock_ = 0;
+        // Saturation effect parameters
+        float saturationDrive;              // Drive level for saturation
+        float saturationMix;                // Mix level for saturation blending
+        float saturationTone;               // Tone setting for saturation to shape warmth or brightness
+    };
 
-    // ── Param cache ────────────────────────────────────────────────────
-    struct Cache {
-        float vowelPos=0, openness=1, gender=1, formantShift=0, formantDepth=0.8f;
-        float spread=0.6f, drift=0.6f, breathe=0.1f, roughness=0.05f;
-        int   era=0, numCopies=2, interval=0, voiceMode=0;
-        float mix=1, caveMix=0.6f, caveSize=0.85f, caveDamp=0.4f, caveEcho=20;
-        float shimmerMix=0, shimmerAmt=0.5f;
-        float masterVol=1, masterGain=0;
-        float satDrive=0.1f;
-        float effDepth=0.8f, effBwMul=1.f, effChoMix=0.35f;
-        float effSat=0.1f,   effShimmer=0.f;
-    } cache_;
+    // Profile storage — 50 presets (was std::map<SoundProfile, ProfileSettings> in MMV)
+    std::array<ProfileSettings, 50> profiles;
 
-    // ── Breath noise ───────────────────────────────────────────────────
-    std::mt19937  rng_{ 42 };
-    std::uniform_real_distribution<float> dist_{ -1.f, 1.f };
-    float breatheState_ = 0.f;
+    // Current profile settings
+    ProfileSettings currentProfile;
+    int profileIndex;
 
-    // ── Param throttle ─────────────────────────────────────────────────
-    int  paramCounter_ = 0;
-    std::atomic<bool> stateRestorePending_{ false };
+    // DSP Modules
+    juce::dsp::FFT fft;
+    juce::dsp::WindowingFunction<float> windowFunction;
+    juce::AudioBuffer<float> fftBuffer;
+    juce::AudioBuffer<float> overlapBuffer;
+    juce::AudioBuffer<float> accumulatedBuffer;
+    int fftSize;
+    int hopSize;
+    int overlapPosition;
 
-    // ── Lock-free scope FIFO ───────────────────────────────────────────
-    static constexpr int kScopeFifoSize = 8192;
-    juce::AbstractFifo   scopeFifo_{ kScopeFifoSize };
-    float                scopeBuf_[kScopeFifoSize] = {};
+    std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandStretcher;
+    juce::dsp::Reverb reverb;
+    juce::dsp::WaveShaper<float> distortion;
+    juce::dsp::Chorus<float> chorus;
+    std::vector<juce::dsp::DelayLine<float>> delayLines;
+    std::array<juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear>, 2> delayLine;
+    juce::dsp::Compressor<float> compressor;
+    juce::dsp::Chorus<float> flanger;
+    juce::dsp::Limiter<float> limiter;
 
-    // ── Diagnostic state ───────────────────────────────────────────────
-    DiagnosticState diagState_;
+    juce::SmoothedValue<float> pitchShiftSmoothed;
 
-    // ── Limiter consecutive-block counter (audio thread only, non-atomic) ──
-    //  Tracks how many consecutive blocks the limiter fired (GR > 0.5 dB).
-    //  Copied into diagState_.limiterConsecBlocks each block.
-    int limiterConsecBlocks_ = 0;
+    // JUCE DSP Delay Lines for Repeater and Stutter
+    juce::dsp::DelayLine<float> repeaterDelayLine;
+    juce::dsp::DelayLine<float> stutterDelayLine;
+    juce::dsp::ProcessSpec spec;
 
-    AVPresetManager presets_;
-    double sr_ = 44100.0;
+    // Initialization and Effect Application
+    void initializeProfiles();
+    void applyProfileEffects(juce::AudioBuffer<float>& buffer);
+    void performPitchShifting(juce::AudioBuffer<float>& buffer, float shiftAmount);
+    void applyHarmonization(juce::AudioBuffer<float>& buffer, float harmonyAmount);
+    void applyReverbEffect(juce::AudioBuffer<float>& buffer, float reverbAmount);
+    void applyDistortionEffect(juce::AudioBuffer<float>& buffer, float distortionAmount);
+    void applyDelayEffect(juce::AudioBuffer<float>& buffer, float delayAmount);
+    void applyChorusEffect(juce::AudioBuffer<float>& buffer, float depth);
+    void applyFlangerEffect(juce::AudioBuffer<float>& buffer, float rate);
+    void applyCompressionEffect(juce::AudioBuffer<float>& buffer, float ratio);
+    void applyStutterEffect(juce::AudioBuffer<float>& buffer, float stutterAmount);
+    void applyNoiseReduction(juce::AudioBuffer<float>& buffer, float reductionAmount);
+    void applyRepeaterEffect(juce::AudioBuffer<float>& buffer, float repeaterAmount);
+    void applyLimiter(juce::AudioBuffer<float>& buffer);
+    void applyReverserEffect(juce::AudioBuffer<float>& buffer, int reverseInterval);
+    void applyStopAndGoEffect(juce::AudioBuffer<float>& buffer, int interval, float silenceRatio);
+    void adjustForSampleRate(float currentSampleRate);
 
-    void updateCache();
-    void updateModules();
-    void initShimmer(double sr, int ch);
-    void applyShimmer(juce::AudioBuffer<float>&);
+    std::unique_ptr<RubberBand::RubberBandStretcher> rubberBandPitchShifter;
+    void initializeDSPModules(const juce::dsp::ProcessSpec& spec);
+    void resetDSPModules();
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AncientVoicesProcessor)
+    // New effect methods declarations
+    void applyVocalDoublerEffect(juce::AudioBuffer<float>& buffer, float detuneAmount, float delayMs);
+    void applySpacedOutDelay(juce::AudioBuffer<float>& buffer, float delayTimeMs, float panAmount);
+    void applyInstabilityEffect(juce::AudioBuffer<float>& buffer, float instabilityDepth);
+    void applyGlitchEffect(juce::AudioBuffer<float>& buffer, float glitchAmount);
+    void applyRubberBandPitchShift(juce::AudioBuffer<float>& buffer, float pitchShiftAmount);
+    void applyAdvancedSaturation(juce::AudioBuffer<float>& buffer, float drive, float mix, float tone);
+
+    juce::AudioProcessorValueTreeState apvts;
+
+    void applyVocalTransitEffect(juce::AudioBuffer<float>& buffer);
+
+    // getTempo method
+    double getTempo() const;
+
+    // DSP Member coefficients
+    juce::dsp::Convolution convolutionReverb;
+    juce::dsp::Chorus<float> modulation;
+    std::vector<juce::dsp::IIR::Filter<float>> antiAliasFilters;
+
+    // Member variables
+    juce::AudioBuffer<float> inputBuffer;
+    int bufferWritePosition = 0;
+    int bufferReadPosition = 0;
+    const int bufferSize = 16384;
+    float sampleRate = 0.0f;
+
+    // Harmonizer buffer management
+    juce::AbstractFifo harmonizerFifo { 16384 };
+    juce::AudioBuffer<float> harmonizerBuffer;
+
+    std::atomic<float>* reverbWet = nullptr;
+    std::atomic<float>* delayMix = nullptr;
+    std::atomic<float>* grainSize = nullptr;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AncientVoicesAudioProcessor)
 };

@@ -25,11 +25,11 @@ private:
     juce::Label    titleLabel, subtitleLabel, presetLabel, profileDisplayLabel, footerLabel;
     juce::ComboBox presetCombo;
 
-    juce::Slider mixSlider, reverbSlider, delaySlider, driveSlider, outputSlider;
-    juce::Label  mixLabel,  reverbLabel,  delayLabel,  driveLabel,  outputLabel;
+    juce::Slider mixSlider, reverbSlider, delaySlider, driveSlider, outputSlider, pitchSlider;
+    juce::Label  mixLabel,  reverbLabel,  delayLabel,  driveLabel,  outputLabel,  pitchLabel;
 
     using SA = juce::AudioProcessorValueTreeState::SliderAttachment;
-    std::unique_ptr<SA> mixAtt, reverbAtt, delayAtt, driveAtt, outputAtt;
+    std::unique_ptr<SA> mixAtt, reverbAtt, delayAtt, driveAtt, outputAtt, pitchAtt;
 
     void populatePresetCombo();
     void onPresetComboChanged();

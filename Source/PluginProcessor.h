@@ -231,6 +231,7 @@ public:
       std::atomic<float>* userDelay = nullptr;
       std::atomic<float>* userDrive = nullptr;
       std::atomic<float>* userOutput = nullptr;
+      std::atomic<float>* userPitch = nullptr;   // user pitch knob, semitones, added to preset pitch
       juce::SmoothedValue<float> mixSmoothed;
       juce::dsp::DelayLine<float> delay{ 44100 }; // Approx. 1-second buffer
       juce::dsp::Gain<float> duckingGain;

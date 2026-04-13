@@ -142,6 +142,7 @@ AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoic
     configureKnob(driveSlider,  driveLabel,  "DRIVE");
     configureKnob(outputSlider, outputLabel, "OUTPUT");
     configureKnob(mixSlider,    mixLabel,    "MIX");
+    configureKnob(pitchSlider,  pitchLabel,  "PITCH");
 
     auto& state = audioProcessor.getAPVTS();
     reverbAtt = std::make_unique<SA>(state, "USER_REVERB", reverbSlider);
@@ -149,6 +150,7 @@ AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoic
     driveAtt  = std::make_unique<SA>(state, "USER_DRIVE",  driveSlider);
     outputAtt = std::make_unique<SA>(state, "USER_OUTPUT", outputSlider);
     mixAtt    = std::make_unique<SA>(state, "MIX",         mixSlider);
+    pitchAtt  = std::make_unique<SA>(state, "USER_PITCH",  pitchSlider);
 
     syncComboFromParameter();
 
@@ -292,14 +294,15 @@ void AncientVoicesAudioProcessorEditor::resized()
     profileDisplayLabel.setBounds(area.removeFromTop(42));
     area.removeFromTop(8);
 
-    // 5 KNOBS across
+    // 6 KNOBS across
     auto knobRow = area.removeFromTop(120);
-    const int knobW = knobRow.getWidth() / 5;
+    const int knobW = knobRow.getWidth() / 6;
     auto placeKnob = [&](juce::Slider& s, juce::Label& lbl) {
         auto cell = knobRow.removeFromLeft(knobW).reduced(6, 0);
         lbl.setBounds(cell.removeFromTop(18));
         s.setBounds(cell);
     };
+    placeKnob(pitchSlider,  pitchLabel);
     placeKnob(reverbSlider, reverbLabel);
     placeKnob(delaySlider,  delayLabel);
     placeKnob(driveSlider,  driveLabel);

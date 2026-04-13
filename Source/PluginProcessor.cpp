@@ -1,3 +1,4 @@
+
 #include <juce_dsp/juce_dsp.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -43,6 +44,7 @@ AncientVoicesAudioProcessor::AncientVoicesAudioProcessor()
     userDelay  = apvts.getRawParameterValue("USER_DELAY");
     userDrive  = apvts.getRawParameterValue("USER_DRIVE");
     userOutput = apvts.getRawParameterValue("USER_OUTPUT");
+    userPitch  = apvts.getRawParameterValue("USER_PITCH");
 
     appProperties.setStorageParameters(options);}
 
@@ -99,6 +101,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout AncientVoicesAudioProcessor:
     params.push_back(std::make_unique<juce::AudioParameterFloat>("USER_DELAY",  "Delay",  0.0f, 1.0f, 0.5f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>("USER_DRIVE",  "Drive",  0.0f, 1.0f, 0.5f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>("USER_OUTPUT", "Output", 0.0f, 2.0f, 1.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("USER_PITCH",  "Pitch",  -12.0f, 12.0f, 0.0f));
 
     return { params.begin(), params.end() };
 }
@@ -834,9 +837,23 @@ void AncientVoicesAudioProcessor::initializeProfiles()
 
     // ============================================================
     // Ancient Voices — 50 appended presets (AV_00..AV_49)
-    // Clean-range caps enforced: instability=0, doublerDetune=0,
-    // saturation=0, glitch=0, stopAndGo=0, stutter=0, reverse=0,
-    // compressionRatio=2.0. filterCutoff era-driven via Presets.h.
+    //
+    // Redesigned for authentic Sumerian / Egyptian / Mesopotamian
+    // character, with aggressive removal of modern-producer artifacts:
+    //   - Drone:   NO flanger, NO distortion, NO doubler, reverb-only
+    //              (pure sustained ziggurat/temple tone)
+    //   - Shimmer: NO flanger, minimal chorus (pitch + reverb only for
+    //              sistrum-like air; stops the metallic-grain artifact)
+    //   - Dark:    NO flanger, NO distortion at deep pitch (removes
+    //              the low-end buzz from stacked modulation)
+    //   - Chant:   Dry sanctuary voice with subtle instability wobble
+    //   - Choir:   Stacked fifths/octaves via harmonizer, wide stereo
+    //   - Ritual:  Temple echoes (delay + big reverb), no modulation
+    //   - Breath:  Intimate, dry, minimal processing
+    //
+    // Era tag drives filterCutoff (via Presets.h):
+    //   Sumerian 4500 / Egyptian 5000 / Akkadian-Babylonian 4200 /
+    //   generic Mesopotamian 4800.
     // ============================================================
     for (int i = 0; i < AncientVoicesPresets::kAvPresetCount; ++i)
     {
@@ -861,104 +878,124 @@ void AncientVoicesAudioProcessor::initializeProfiles()
         const int sub = i % 8;
         const float v = static_cast<float>(sub);
 
+        // Era micro-adjustment factor for pitch/reverb variety
+        const bool isEgyptian = (preset.era == AncientVoicesPresets::Era::Egyptian);
+        const bool isSumerian = (preset.era == AncientVoicesPresets::Era::Sumerian);
+        const bool isAkkadian = (preset.era == AncientVoicesPresets::Era::AkkadianBabylonian);
+
         switch (preset.category)
         {
             case AncientVoicesPresets::Category::Chant:
-                s.pitchShiftAmount     = -2.0f + v * 0.66f;          // -2..+2
-                s.harmonizerAmount     = 0.3f + (sub % 3) * 0.1f;    // 0.3..0.5
-                s.reverbAmount         = 0.6f + (sub % 3) * 0.1f;    // 0.6..0.8
-                s.delayAmount          = 0.05f;
-                s.chorusDepth          = 0.15f;
+                // Sanctuary voice: subtle pitch, dry-ish reverb, a touch of
+                // natural wobble (instability) for authentic chant waver.
+                s.pitchShiftAmount     = (isEgyptian ? 1.0f : -1.0f) + v * 0.4f;  // era-biased
+                s.harmonizerAmount     = 0.15f + (sub % 3) * 0.05f;               // 0.15..0.25 (modest)
+                s.reverbAmount         = 0.55f + (sub % 3) * 0.05f;               // 0.55..0.65
+                s.delayAmount          = 0.0f;
+                s.chorusDepth          = 0.08f;
                 s.flangerRate          = 0.0f;
                 s.distortionAmount     = 0.0f;
-                s.vocalDoublerDelayMs  = 10.0f;
+                s.instabilityDepth     = 0.03f;                                   // tiny pitch waver
+                s.vocalDoublerDelayMs  = 0.0f;
                 s.spacedOutDelayTimeMs = 0.0f;
                 s.spacedOutPanAmount   = 0.0f;
                 s.outputGain           = 0.95f;
                 break;
 
             case AncientVoicesPresets::Category::Drone:
-                s.pitchShiftAmount     = -5.0f - v * 1.0f;           // -5..-12
+                // Pure ziggurat/temple sustained tone.
+                // REVERB ONLY. Zero modulation. Zero distortion. Zero doubler.
+                s.pitchShiftAmount     = -4.0f - v * 1.0f;                        // -4..-11
                 s.harmonizerAmount     = 0.0f;
-                s.reverbAmount         = 0.75f + (sub % 2) * 0.05f;  // 0.75/0.80
+                s.reverbAmount         = 0.85f + (sub % 2) * 0.05f;               // 0.85/0.90 (deep)
                 s.delayAmount          = 0.0f;
-                s.chorusDepth          = 0.2f;
-                s.flangerRate          = 0.05f;
-                s.distortionAmount     = 0.1f;
-                s.vocalDoublerDelayMs  = 25.0f;
+                s.chorusDepth          = 0.0f;                                    // was 0.2 — artifact
+                s.flangerRate          = 0.0f;                                    // was 0.05 — artifact
+                s.distortionAmount     = 0.0f;                                    // was 0.1 — artifact
+                s.vocalDoublerDelayMs  = 0.0f;                                    // was 25 — artifact
                 s.spacedOutDelayTimeMs = 0.0f;
                 s.spacedOutPanAmount   = 0.0f;
                 s.outputGain           = 0.9f;
                 break;
 
             case AncientVoicesPresets::Category::Choir:
-                s.pitchShiftAmount     = v * 0.5f;                   // 0..+3.5
-                s.harmonizerAmount     = 0.5f + (sub % 2) * 0.1f;    // 0.5/0.6
-                s.reverbAmount         = 0.65f;
-                s.delayAmount          = 0.05f;
-                s.chorusDepth          = 0.25f + (sub % 2) * 0.05f;  // 0.25/0.30
-                s.flangerRate          = 0.05f;
+                // Stacked voices in temple: harmonizer + wide stereo + medium reverb.
+                s.pitchShiftAmount     = (isSumerian ? -1.0f : 0.5f) + v * 0.3f;
+                s.harmonizerAmount     = 0.55f + (sub % 3) * 0.08f;               // 0.55..0.71
+                s.reverbAmount         = 0.72f;
+                s.delayAmount          = 0.0f;
+                s.chorusDepth          = 0.18f + (sub % 2) * 0.04f;               // 0.18/0.22
+                s.flangerRate          = 0.0f;                                    // was 0.05
                 s.distortionAmount     = 0.0f;
-                s.vocalDoublerDelayMs  = 15.0f;
-                s.spacedOutDelayTimeMs = 30.0f + (sub % 3) * 10.0f;  // 30..50
-                s.spacedOutPanAmount   = 0.5f + (sub % 3) * 0.1f;    // 0.5..0.7
+                s.vocalDoublerDelayMs  = 18.0f + (sub % 3) * 4.0f;                // 18..26
+                s.spacedOutDelayTimeMs = 35.0f + (sub % 3) * 8.0f;                // 35..51 (stereo width)
+                s.spacedOutPanAmount   = 0.55f + (sub % 3) * 0.08f;               // 0.55..0.71
                 s.outputGain           = 0.9f;
                 break;
 
             case AncientVoicesPresets::Category::Ritual:
-                s.pitchShiftAmount     = -4.0f + v * 1.0f;           // -4..+4
-                s.harmonizerAmount     = 0.3f;
-                s.reverbAmount         = 0.7f;
-                s.delayAmount          = 0.15f;
-                s.chorusDepth          = 0.15f;
-                s.flangerRate          = 0.1f;
-                s.distortionAmount     = 0.15f;
-                s.vocalDoublerDelayMs  = 15.0f;
-                s.spacedOutDelayTimeMs = 20.0f;
-                s.spacedOutPanAmount   = 0.3f;
+                // Processional drama: temple delay echoes + big reverb.
+                s.pitchShiftAmount     = -3.0f + v * 0.75f;                       // -3..+2.25
+                s.harmonizerAmount     = 0.25f;
+                s.reverbAmount         = 0.78f;
+                s.delayAmount          = 0.18f + (sub % 3) * 0.03f;               // 0.18..0.24
+                s.chorusDepth          = 0.1f;
+                s.flangerRate          = 0.0f;                                    // was 0.1
+                s.distortionAmount     = 0.0f;                                    // was 0.15
+                s.vocalDoublerDelayMs  = 12.0f;
+                s.spacedOutDelayTimeMs = 25.0f;
+                s.spacedOutPanAmount   = 0.35f;
                 s.outputGain           = 0.9f;
                 break;
 
             case AncientVoicesPresets::Category::Breath:
-                s.pitchShiftAmount     = -1.0f + (sub % 3) * 1.0f;   // -1..+1
-                s.harmonizerAmount     = 0.1f;
-                s.reverbAmount         = 0.4f + (sub % 2) * 0.1f;    // 0.4/0.5
+                // Scribe's whisper, desert reed — intimate, nearly dry.
+                s.pitchShiftAmount     = -0.5f + (sub % 3) * 0.5f;                // -0.5..+0.5
+                s.harmonizerAmount     = 0.05f;
+                s.reverbAmount         = 0.25f + (sub % 2) * 0.08f;               // 0.25/0.33
                 s.delayAmount          = 0.0f;
-                s.chorusDepth          = 0.1f;
+                s.chorusDepth          = 0.05f;
                 s.flangerRate          = 0.0f;
                 s.distortionAmount     = 0.0f;
-                s.vocalDoublerDelayMs  = 5.0f;
+                s.vocalDoublerDelayMs  = 0.0f;
                 s.spacedOutDelayTimeMs = 0.0f;
                 s.spacedOutPanAmount   = 0.0f;
                 s.outputGain           = 0.95f;
                 break;
 
             case AncientVoicesPresets::Category::Shimmer:
-                s.pitchShiftAmount     = 7.0f + (sub % 6) * 1.0f;    // +7..+12
-                s.harmonizerAmount     = 0.3f;
-                s.reverbAmount         = 0.65f;
-                s.delayAmount          = 0.08f;
-                s.chorusDepth          = 0.25f;
-                s.flangerRate          = 0.08f;
-                s.distortionAmount     = 0.0f;                        // none on shimmer
-                s.vocalDoublerDelayMs  = 10.0f;
-                s.spacedOutDelayTimeMs = 20.0f;
-                s.spacedOutPanAmount   = 0.4f;
-                s.outputGain           = 1.0f;
+                // Sistrum / lapis sparkle: HIGH PITCH + REVERB only.
+                // Removed flanger + reduced chorus drastically — these were
+                // stacking with the pitch-shift grain to produce the static.
+                s.pitchShiftAmount     = 5.0f + (sub % 6) * 1.0f;                 // +5..+10 (was +7..+12)
+                s.harmonizerAmount     = 0.15f;                                   // was 0.3
+                s.reverbAmount         = 0.75f;                                   // was 0.65 (more air)
+                s.delayAmount          = 0.0f;                                    // was 0.08
+                s.chorusDepth          = 0.05f;                                   // was 0.25 — artifact
+                s.flangerRate          = 0.0f;                                    // was 0.08 — artifact
+                s.distortionAmount     = 0.0f;
+                s.vocalDoublerDelayMs  = 0.0f;                                    // was 10
+                s.spacedOutDelayTimeMs = 15.0f;                                   // was 20
+                s.spacedOutPanAmount   = 0.3f;                                    // was 0.4
+                s.outputGain           = 0.95f;
                 break;
 
             case AncientVoicesPresets::Category::Dark:
-                s.pitchShiftAmount     = -7.0f - (sub % 6) * 1.0f;   // -7..-12
-                s.harmonizerAmount     = 0.2f;
-                s.reverbAmount         = 0.8f;
-                s.delayAmount          = 0.1f;
-                s.chorusDepth          = 0.15f;
-                s.flangerRate          = 0.05f;
-                s.distortionAmount     = 0.18f;                       // <=0.2
-                s.vocalDoublerDelayMs  = 30.0f;
-                s.spacedOutDelayTimeMs = 10.0f;
-                s.spacedOutPanAmount   = 0.2f;
+                // Kur / tomb descent: deep pitch + long reverb, nothing else.
+                s.pitchShiftAmount     = -6.0f - (sub % 6) * 1.0f;                // -6..-11 (was -7..-12)
+                s.harmonizerAmount     = 0.1f;                                    // was 0.2
+                s.reverbAmount         = 0.9f;                                    // was 0.8
+                s.delayAmount          = 0.12f;
+                s.chorusDepth          = 0.05f;                                   // was 0.15
+                s.flangerRate          = 0.0f;                                    // was 0.05
+                s.distortionAmount     = 0.0f;                                    // was 0.18 — low-end buzz
+                s.vocalDoublerDelayMs  = 0.0f;                                    // was 30
+                s.spacedOutDelayTimeMs = 0.0f;                                    // was 10
+                s.spacedOutPanAmount   = 0.15f;
                 s.outputGain           = 0.85f;
+                // Akkadian Dark presets (Lamashtu, Nergal's Gate, Pazuzu) get
+                // slightly darker cutoff — era tag already handles this via 4200Hz.
+                if (isAkkadian) s.reverbAmount = 0.95f;
                 break;
         }
 
@@ -997,14 +1034,12 @@ void AncientVoicesAudioProcessor::applyProfileEffects(juce::AudioBuffer<float>& 
                    //DBG("Initialized RubberBand stretcher.");
                }
 
-               // Ensure pitch shift amount is within expected bounds
+               // Combine preset pitch with user-knob pitch offset, clamp to ±24st
                float pitchShiftAmount = currentProfile.pitchShiftAmount;
-               //DBG("Pitch Shift Amount: " << pitchShiftAmount);
-               if (pitchShiftAmount < -12.0f || pitchShiftAmount > 12.0f)
-               {
-                   //DBG("Pitch shift amount out of range, returning.");
-                   return;
-               }
+               if (userPitch != nullptr)
+                   pitchShiftAmount += userPitch->load();
+               pitchShiftAmount = juce::jlimit(-24.0f, 24.0f, pitchShiftAmount);
+               //DBG("Pitch Shift Amount (preset+user, clamped): " << pitchShiftAmount);
 
                // Process pitch shifting
                //DBG("Applying Pitch Shift...");

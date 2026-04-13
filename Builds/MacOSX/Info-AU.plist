@@ -31,15 +31,15 @@
         <key>name</key>
         <string>Tully EDM Vibe: Ancient Voices</string>
         <key>description</key>
-        <string>Ancient Vocal Transformer</string>
+        <string>Vocal transformer - Sumerian, Egyptian, and Mesopotamian voices</string>
         <key>factoryFunction</key>
-        <string>AncientVoicesFactory</string>
+        <string>AncientVoicesAUFactory</string>
         <key>manufacturer</key>
         <string>Tull</string>
         <key>type</key>
-        <string>aufx</string>
+        <string>aumf</string>
         <key>subtype</key>
-        <string>AV06</string>
+        <string>Avox</string>
         <key>version</key>
         <integer>65536</integer>
         <key>resourceUsage</key>

@@ -1,7 +1,7 @@
+
 #include <juce_dsp/juce_dsp.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "Data/Presets.h"
 #include "Data/Presets.h"
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -38,11 +38,6 @@ AncientVoicesAudioProcessor::AncientVoicesAudioProcessor()
     options.osxLibrarySubFolder = "Application Support"; // macOS-specific folder
     duckingSensitivity = apvts.getRawParameterValue("DUCKING_SENSITIVITY");
     glitchIntensity = apvts.getRawParameterValue("GLITCH_INTENSITY");
-    mixAmount  = apvts.getRawParameterValue("MIX");
-    userReverb = apvts.getRawParameterValue("USER_REVERB");
-    userDelay  = apvts.getRawParameterValue("USER_DELAY");
-    userDrive  = apvts.getRawParameterValue("USER_DRIVE");
-    userOutput = apvts.getRawParameterValue("USER_OUTPUT");
 
     appProperties.setStorageParameters(options);}
 
@@ -92,13 +87,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout AncientVoicesAudioProcessor:
     params.push_back(std::make_unique<juce::AudioParameterBool>("HARMONY", "Harmony Enabled", false));
     params.push_back(std::make_unique<juce::AudioParameterBool>("NOISE_REDUCTION", "Noise Reduction Enabled", false));
     params.push_back(std::make_unique<juce::AudioParameterBool>("REPEATER", "Repeater Enabled", false));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("DUCKING_SENSITIVITY", "Ducking Sensitivity", 0.0f, 1.0f, 0.0f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("GLITCH_INTENSITY", "Glitch Intensity", 0.0f, 1.0f, 0.0f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("MIX",         "Mix",    0.0f, 1.0f, 1.0f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("USER_REVERB", "Reverb", 0.0f, 1.0f, 0.5f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("USER_DELAY",  "Delay",  0.0f, 1.0f, 0.5f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("USER_DRIVE",  "Drive",  0.0f, 1.0f, 0.5f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("USER_OUTPUT", "Output", 0.0f, 2.0f, 1.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("DUCKING_SENSITIVITY", "Ducking Sensitivity", 0.0f, 1.0f, 0.5f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("GLITCH_INTENSITY", "Glitch Intensity", 0.0f, 1.0f, 0.5f));
 
     return { params.begin(), params.end() };
 }
@@ -352,20 +342,17 @@ void AncientVoicesAudioProcessor::setLicenseStatus(bool status) {
 }
 void AncientVoicesAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
-    // License state tracked in isLicensed / isLicenseValid() / setLicenseStatus()
-    // but NOT gating audio — plugin passes audio regardless so the host signal
-    // chain and waveform display remain functional during evaluation.
-
+    if (!isLicensed)
+    {
+        buffer.clear(); // Clear audio buffer if not licensed
+        return;
+    }
+    
     juce::ScopedNoDenormals noDenormals;
     const int numInputChannels = getTotalNumInputChannels();
     const int numOutputChannels = getTotalNumOutputChannels();
     const int numSamples = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
-
-    // === DRY CAPTURE for MIX crossfade ===
-    juce::AudioBuffer<float> dryBuffer(numChannels, numSamples);
-    for (int ch = 0; ch < numChannels; ++ch)
-        dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
     // Logging start of processBlock
     //DBG("==> 1 Processing block with " << numOutputChannels << " output channels and " << numSamples << " samples.");
 
@@ -454,16 +441,13 @@ void AncientVoicesAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         //DBG("11 Applying profile effects...");
         applyProfileEffects(buffer);
         
-        // Apply ducking effect (only if user turned it up)
+        // Apply ducking effect
             const float sensitivity = *duckingSensitivity;
-            if (sensitivity > 0.001f) {
-                duckingGain.setGainLinear(1.0f - sensitivity);
-                duckingGain.process(context);
-            }
+            duckingGain.setGainLinear(1.0f - sensitivity);
+            duckingGain.process(context);
 
-            // Apply glitch effect (only if user turned it up)
+            // Apply glitch effect
             const float intensity = *glitchIntensity;
-            if (intensity > 0.001f) {
             for (int channel = 0; channel < numChannels; ++channel)
             {
                 auto* channelData = buffer.getWritePointer(channel);
@@ -479,28 +463,13 @@ void AncientVoicesAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     }
                 }
             }
-            }
         // Apply limiter to prevent clipping
         //DBG("12 Applying limiter to the buffer...");
         applyLimiter(buffer);
 
-        // === USER OUTPUT GAIN ===
-        if (userOutput != nullptr) {
-            buffer.applyGain(userOutput->load());
-        }
-
-        // === MIX CROSSFADE: mix=1.0 => pure wet (no dry bleed); mix=0.0 => pure dry ===
-        if (mixAmount != nullptr) {
-            const float mix = mixAmount->load();
-            const float wetGain = mix;
-            const float dryGain = 1.0f - mix;
-            for (int ch = 0; ch < numChannels; ++ch) {
-                auto* wetData = buffer.getWritePointer(ch);
-                const auto* dryData = dryBuffer.getReadPointer(ch);
-                for (int i = 0; i < numSamples; ++i)
-                    wetData[i] = wetGain * wetData[i] + dryGain * dryData[i];
-            }
-        }
+        // Apply noise reduction for light static/crackling reduction
+        //DBG("13 Applying Noise Reduction...");
+        applyNoiseReduction(buffer, 0.5);
         
         // Capture output buffer for GUI graph after processing
         juce::AudioBuffer<float> outputBufferAfterProcessing(buffer.getNumChannels(), buffer.getNumSamples());

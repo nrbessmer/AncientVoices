@@ -7,6 +7,7 @@
 #include <cmath>  // For mathematical functions and constants
 #include <juce_dsp/juce_dsp.h>
 #include <rubberband/RubberBandStretcher.h>
+#include "DSPModules.h"
 class AncientVoicesAudioProcessor  : public juce::AudioProcessor
 {
 public:
@@ -132,6 +133,77 @@ public:
         float saturationDrive;              // Drive level for saturation
         float saturationMix;                // Mix level for saturation blending
         float saturationTone;               // Tone setting for saturation to shape warmth or brightness
+
+        // ------------------------------------------------------------
+        // Session 1 extensions — all default 0 = module disabled.
+        // MMV's original 10 profiles leave these zero, preserving
+        // their original character exactly.
+        // ------------------------------------------------------------
+        float formantShiftSemitones = 0.0f;   // ±N semitones, independent of pitch (0 = bypass)
+
+        float   lfo1RateHz    = 0.0f;         // 0 = LFO disabled
+        float   lfo1Depth     = 0.0f;         // unit depends on destination
+        int     lfo1Shape     = 0;            // 0=sine 1=tri 2=saw 3=random-stepped
+        AV::ModDest lfo1Dest  = AV::ModDest::None;
+
+        float   envFollowAttackMs  = 5.0f;
+        float   envFollowReleaseMs = 150.0f;
+        float   envFollowDepth     = 0.0f;    // 0 = disabled
+        AV::ModDest envFollowDest  = AV::ModDest::None;
+
+        // ------------------------------------------------------------
+        // Session 2 extensions — multi-tap delay, reverse reverb,
+        // comb filter, enhanced reverb. All default 0/off.
+        // ------------------------------------------------------------
+        float multiTapMix          = 0.0f;    // 0 = bypass multi-tap
+        float multiTapTimesMs[4]   = { 0.0f, 0.0f, 0.0f, 0.0f };
+        float multiTapGains[4]     = { 0.0f, 0.0f, 0.0f, 0.0f };
+        float multiTapPans[4]      = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+        float reverseReverbMix     = 0.0f;    // 0 = bypass
+        float reverseReverbWindowSec = 2.0f;
+
+        float combFreqHz           = 0.0f;    // 0 = bypass comb
+        float combFeedback         = 0.0f;
+        float combMix              = 0.0f;
+
+        bool  useEnhancedReverb    = false;   // if true, routes through EnhancedReverb instead
+        float reverbPreDelayMs     = 0.0f;    // only used when useEnhancedReverb
+        float reverbHfDampingDb    = 0.0f;    // negative dB = cut highs (e.g. -6.0)
+
+        // ------------------------------------------------------------
+        // Session 3 extensions — phase vocoder, granular, bitcrusher,
+        // dynamic EQ, noise generator, transient shaper. All default 0/off.
+        // ------------------------------------------------------------
+        float pvFreezeAmount       = 0.0f;    // 0..1 — hold magnitudes
+        float pvSmearAmount        = 0.0f;    // 0..1 — spectral average
+        float pvMix                = 0.0f;    // 0 = bypass
+
+        float granularMix          = 0.0f;    // 0 = bypass
+        float granularGrainSizeMs  = 50.0f;
+        float granularDensity      = 0.0f;    // grains/sec
+        float granularPitchSpreadSemi = 0.0f;
+        float granularPitchBaseSemi   = 0.0f;
+        float granularReverseProb  = 0.0f;
+        float granularPositionJitter = 0.5f;
+
+        float bitcrushMix          = 0.0f;    // 0 = bypass
+        float bitcrushBitDepth     = 12.0f;
+        float bitcrushSampleRateHz = 22050.0f;
+
+        float dynEqMix             = 0.0f;    // 0 = bypass
+        float dynEqFreqHz          = 2000.0f;
+        float dynEqQ               = 1.2f;
+        float dynEqTargetGainDb    = 0.0f;    // + boost, - cut
+        float dynEqThreshold       = 0.1f;
+
+        float noiseLevel           = 0.0f;    // 0 = bypass
+        int   noiseColor           = 0;       // 0=white, 1=pink
+        float noiseHighPassHz      = 0.0f;
+        bool  noiseGated           = false;
+
+        float transientAttackDb    = 0.0f;    // 0 = bypass
+        float transientMix         = 0.0f;
     };
 
 
@@ -236,5 +308,31 @@ public:
       juce::dsp::DelayLine<float> delay{ 44100 }; // Approx. 1-second buffer
       juce::dsp::Gain<float> duckingGain;
     juce::dsp::WaveShaper<float> glitchEffect;
+
+    // ------------------------------------------------------------
+    // Session 1 DSP modules — instantiated once, prepared in
+    // prepareToPlay(), driven per-preset from applyProfileEffects().
+    // ------------------------------------------------------------
+    AV::LFO              lfo1;
+    AV::EnvelopeFollower envFollower;
+    AV::FormantShifter   formantShifter;
+
+    // ------------------------------------------------------------
+    // Session 2 DSP modules
+    // ------------------------------------------------------------
+    AV::MultiTapDelay    multiTap;
+    AV::ReverseReverb    reverseReverb;
+    AV::CombFilter       combFilter;
+    AV::EnhancedReverb   enhancedReverb;
+
+    // ------------------------------------------------------------
+    // Session 3 DSP modules
+    // ------------------------------------------------------------
+    AV::PhaseVocoderFreeze phaseVocoder;
+    AV::GranularEngine     granular;
+    AV::Bitcrusher         bitcrusher;
+    AV::DynamicEqBand      dynamicEq;
+    AV::NoiseGenerator     noiseGen;
+    AV::TransientShaper    transientShaper;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AncientVoicesAudioProcessor)
 };

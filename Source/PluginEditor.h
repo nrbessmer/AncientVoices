@@ -23,6 +23,7 @@ private:
     juce::TooltipWindow tooltipWindow;
 
     juce::Label    titleLabel, subtitleLabel, presetLabel, profileDisplayLabel, footerLabel;
+    juce::HyperlinkButton footerEmailLink;
     juce::ComboBox presetCombo;
 
     juce::Slider mixSlider, reverbSlider, delaySlider, driveSlider, outputSlider, pitchSlider;

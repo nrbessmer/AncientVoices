@@ -18,6 +18,8 @@
       <FILE id="VDQcg6" name="PluginEditor.cpp" compile="1" resource="0"
             file="Source/PluginEditor.cpp"/>
       <FILE id="hVTRLF" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
+      <FILE id="dspMod1" name="DSPModules.h" compile="0" resource="0" file="Source/DSPModules.h"/>
+      <FILE id="dspMod2" name="DSPModules.cpp" compile="1" resource="0" file="Source/DSPModules.cpp"/>
       <GROUP id="{AVD4746E-1111-2222-3333-444455556666}" name="Data">
         <FILE id="avPrst1" name="Presets.h" compile="0" resource="0" file="Source/Data/Presets.h"/>
       </GROUP>

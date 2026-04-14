@@ -324,6 +324,25 @@ void AncientVoicesAudioProcessor::initializeDSPModules(const juce::dsp::ProcessS
         compressor.prepare(spec);
         limiter.prepare(spec);
 
+        // --- Session 1 modules ---
+        lfo1.prepare(spec.sampleRate);
+        envFollower.prepare(spec.sampleRate);
+        formantShifter.prepare(spec.sampleRate, (int) spec.numChannels);
+
+        // --- Session 2 modules ---
+        multiTap.prepare(spec.sampleRate, (int) spec.maximumBlockSize);
+        reverseReverb.prepare(spec.sampleRate, (int) spec.numChannels);
+        combFilter.prepare(spec.sampleRate);
+        enhancedReverb.prepare(spec.sampleRate, (int) spec.maximumBlockSize);
+
+        // --- Session 3 modules ---
+        phaseVocoder.prepare(spec.sampleRate, (int) spec.numChannels);
+        granular.prepare(spec.sampleRate, 4);
+        bitcrusher.prepare(spec.sampleRate);
+        dynamicEq.prepare(spec.sampleRate);
+        noiseGen.prepare(spec.sampleRate);
+        transientShaper.prepare(spec.sampleRate);
+
         // Additional modules as needed
     }
     catch (const std::exception& e)
@@ -836,170 +855,1149 @@ void AncientVoicesAudioProcessor::initializeProfiles()
     };
 
     // ============================================================
-    // Ancient Voices — 50 appended presets (AV_00..AV_49)
+    // Ancient Voices — 50 presets (AV_00..AV_49), SESSION 1
     //
-    // Redesigned for authentic Sumerian / Egyptian / Mesopotamian
-    // character, with aggressive removal of modern-producer artifacts:
-    //   - Drone:   NO flanger, NO distortion, NO doubler, reverb-only
-    //              (pure sustained ziggurat/temple tone)
-    //   - Shimmer: NO flanger, minimal chorus (pitch + reverb only for
-    //              sistrum-like air; stops the metallic-grain artifact)
-    //   - Dark:    NO flanger, NO distortion at deep pitch (removes
-    //              the low-end buzz from stacked modulation)
-    //   - Chant:   Dry sanctuary voice with subtle instability wobble
-    //   - Choir:   Stacked fifths/octaves via harmonizer, wide stereo
-    //   - Ritual:  Temple echoes (delay + big reverb), no modulation
-    //   - Breath:  Intimate, dry, minimal processing
+    // Each preset is individually configured from the authoritative
+    // spec document. Using session-1 modules where possible:
+    //   - FormantShifter (formantShiftSemitones)
+    //   - LFO            (lfo1* fields)
+    //   - EnvelopeFollower (envFollow* fields)
     //
-    // Era tag drives filterCutoff (via Presets.h):
-    //   Sumerian 4500 / Egyptian 5000 / Akkadian-Babylonian 4200 /
-    //   generic Mesopotamian 4800.
+    // Spec elements NOT yet available (granular, phase vocoder,
+    // reverse reverb, dynamic EQ, bitcrusher, multi-tap delay)
+    // are approximated using existing DSP; faithful implementations
+    // come in session 2+. Comments mark each preset's deferred bits.
+    //
+    // Helper lambda to reduce boilerplate.
     // ============================================================
-    for (int i = 0; i < AncientVoicesPresets::kAvPresetCount; ++i)
-    {
-        const auto& preset = AncientVoicesPresets::getPreset(i);
+    auto makeAV = [&](int avIdx, ProfileSettings s) {
+        const auto& preset = AncientVoicesPresets::getPreset(avIdx);
+        s.filterCutoff = AncientVoicesPresets::getFilterCutoffForEra(preset.era);
+        // Defaults for fields not set by the preset (safe zero/neutral)
+        if (s.compressionRatio == 0.0f) s.compressionRatio = 2.0f;
+        if (s.outputGain       == 0.0f) s.outputGain       = 0.9f;
         const SoundProfile key = static_cast<SoundProfile>(
-            static_cast<int>(SoundProfile::AV_00) + i);
-
-        ProfileSettings s{};
-        s.filterCutoff             = AncientVoicesPresets::getFilterCutoffForEra(preset.era);
-        s.compressionRatio         = 2.0f;
-        s.instabilityDepth         = 0.0f;
-        s.vocalDoublerDetuneAmount = 0.0f;
-        s.saturationDrive          = 0.0f;
-        s.saturationMix            = 0.0f;
-        s.saturationTone           = 0.0f;
-        s.glitchAmount             = 0.0f;
-        s.stopAndGoInterval        = 0;
-        s.stopAndGoSilenceRatio    = 0.0f;
-        s.stutterRepeatLength      = 0;
-        s.reverseInterval          = 0;
-
-        const int sub = i % 8;
-        const float v = static_cast<float>(sub);
-
-        // Era micro-adjustment factor for pitch/reverb variety
-        const bool isEgyptian = (preset.era == AncientVoicesPresets::Era::Egyptian);
-        const bool isSumerian = (preset.era == AncientVoicesPresets::Era::Sumerian);
-        const bool isAkkadian = (preset.era == AncientVoicesPresets::Era::AkkadianBabylonian);
-
-        switch (preset.category)
-        {
-            case AncientVoicesPresets::Category::Chant:
-                // Sanctuary voice: subtle pitch, dry-ish reverb, a touch of
-                // natural wobble (instability) for authentic chant waver.
-                s.pitchShiftAmount     = (isEgyptian ? 1.0f : -1.0f) + v * 0.4f;  // era-biased
-                s.harmonizerAmount     = 0.15f + (sub % 3) * 0.05f;               // 0.15..0.25 (modest)
-                s.reverbAmount         = 0.55f + (sub % 3) * 0.05f;               // 0.55..0.65
-                s.delayAmount          = 0.0f;
-                s.chorusDepth          = 0.08f;
-                s.flangerRate          = 0.0f;
-                s.distortionAmount     = 0.0f;
-                s.instabilityDepth     = 0.03f;                                   // tiny pitch waver
-                s.vocalDoublerDelayMs  = 0.0f;
-                s.spacedOutDelayTimeMs = 0.0f;
-                s.spacedOutPanAmount   = 0.0f;
-                s.outputGain           = 0.95f;
-                break;
-
-            case AncientVoicesPresets::Category::Drone:
-                // Pure ziggurat/temple sustained tone.
-                // REVERB ONLY. Zero modulation. Zero distortion. Zero doubler.
-                s.pitchShiftAmount     = -4.0f - v * 1.0f;                        // -4..-11
-                s.harmonizerAmount     = 0.0f;
-                s.reverbAmount         = 0.85f + (sub % 2) * 0.05f;               // 0.85/0.90 (deep)
-                s.delayAmount          = 0.0f;
-                s.chorusDepth          = 0.0f;                                    // was 0.2 — artifact
-                s.flangerRate          = 0.0f;                                    // was 0.05 — artifact
-                s.distortionAmount     = 0.0f;                                    // was 0.1 — artifact
-                s.vocalDoublerDelayMs  = 0.0f;                                    // was 25 — artifact
-                s.spacedOutDelayTimeMs = 0.0f;
-                s.spacedOutPanAmount   = 0.0f;
-                s.outputGain           = 0.9f;
-                break;
-
-            case AncientVoicesPresets::Category::Choir:
-                // Stacked voices in temple: harmonizer + wide stereo + medium reverb.
-                s.pitchShiftAmount     = (isSumerian ? -1.0f : 0.5f) + v * 0.3f;
-                s.harmonizerAmount     = 0.55f + (sub % 3) * 0.08f;               // 0.55..0.71
-                s.reverbAmount         = 0.72f;
-                s.delayAmount          = 0.0f;
-                s.chorusDepth          = 0.18f + (sub % 2) * 0.04f;               // 0.18/0.22
-                s.flangerRate          = 0.0f;                                    // was 0.05
-                s.distortionAmount     = 0.0f;
-                s.vocalDoublerDelayMs  = 18.0f + (sub % 3) * 4.0f;                // 18..26
-                s.spacedOutDelayTimeMs = 35.0f + (sub % 3) * 8.0f;                // 35..51 (stereo width)
-                s.spacedOutPanAmount   = 0.55f + (sub % 3) * 0.08f;               // 0.55..0.71
-                s.outputGain           = 0.9f;
-                break;
-
-            case AncientVoicesPresets::Category::Ritual:
-                // Processional drama: temple delay echoes + big reverb.
-                s.pitchShiftAmount     = -3.0f + v * 0.75f;                       // -3..+2.25
-                s.harmonizerAmount     = 0.25f;
-                s.reverbAmount         = 0.78f;
-                s.delayAmount          = 0.18f + (sub % 3) * 0.03f;               // 0.18..0.24
-                s.chorusDepth          = 0.1f;
-                s.flangerRate          = 0.0f;                                    // was 0.1
-                s.distortionAmount     = 0.0f;                                    // was 0.15
-                s.vocalDoublerDelayMs  = 12.0f;
-                s.spacedOutDelayTimeMs = 25.0f;
-                s.spacedOutPanAmount   = 0.35f;
-                s.outputGain           = 0.9f;
-                break;
-
-            case AncientVoicesPresets::Category::Breath:
-                // Scribe's whisper, desert reed — intimate, nearly dry.
-                s.pitchShiftAmount     = -0.5f + (sub % 3) * 0.5f;                // -0.5..+0.5
-                s.harmonizerAmount     = 0.05f;
-                s.reverbAmount         = 0.25f + (sub % 2) * 0.08f;               // 0.25/0.33
-                s.delayAmount          = 0.0f;
-                s.chorusDepth          = 0.05f;
-                s.flangerRate          = 0.0f;
-                s.distortionAmount     = 0.0f;
-                s.vocalDoublerDelayMs  = 0.0f;
-                s.spacedOutDelayTimeMs = 0.0f;
-                s.spacedOutPanAmount   = 0.0f;
-                s.outputGain           = 0.95f;
-                break;
-
-            case AncientVoicesPresets::Category::Shimmer:
-                // Sistrum / lapis sparkle: HIGH PITCH + REVERB only.
-                // Removed flanger + reduced chorus drastically — these were
-                // stacking with the pitch-shift grain to produce the static.
-                s.pitchShiftAmount     = 5.0f + (sub % 6) * 1.0f;                 // +5..+10 (was +7..+12)
-                s.harmonizerAmount     = 0.15f;                                   // was 0.3
-                s.reverbAmount         = 0.75f;                                   // was 0.65 (more air)
-                s.delayAmount          = 0.0f;                                    // was 0.08
-                s.chorusDepth          = 0.05f;                                   // was 0.25 — artifact
-                s.flangerRate          = 0.0f;                                    // was 0.08 — artifact
-                s.distortionAmount     = 0.0f;
-                s.vocalDoublerDelayMs  = 0.0f;                                    // was 10
-                s.spacedOutDelayTimeMs = 15.0f;                                   // was 20
-                s.spacedOutPanAmount   = 0.3f;                                    // was 0.4
-                s.outputGain           = 0.95f;
-                break;
-
-            case AncientVoicesPresets::Category::Dark:
-                // Kur / tomb descent: deep pitch + long reverb, nothing else.
-                s.pitchShiftAmount     = -6.0f - (sub % 6) * 1.0f;                // -6..-11 (was -7..-12)
-                s.harmonizerAmount     = 0.1f;                                    // was 0.2
-                s.reverbAmount         = 0.9f;                                    // was 0.8
-                s.delayAmount          = 0.12f;
-                s.chorusDepth          = 0.05f;                                   // was 0.15
-                s.flangerRate          = 0.0f;                                    // was 0.05
-                s.distortionAmount     = 0.0f;                                    // was 0.18 — low-end buzz
-                s.vocalDoublerDelayMs  = 0.0f;                                    // was 30
-                s.spacedOutDelayTimeMs = 0.0f;                                    // was 10
-                s.spacedOutPanAmount   = 0.15f;
-                s.outputGain           = 0.85f;
-                // Akkadian Dark presets (Lamashtu, Nergal's Gate, Pazuzu) get
-                // slightly darker cutoff — era tag already handles this via 4200Hz.
-                if (isAkkadian) s.reverbAmount = 0.95f;
-                break;
-        }
-
+            static_cast<int>(SoundProfile::AV_00) + avIdx);
         profiles[key] = s;
+    };
+
+    // =====================================================
+    //   CHANT (AV_00 .. AV_06)
+    // =====================================================
+
+    // AV_00 Eridu Invocation (Sumerian) — first-city invocation, grounded voice
+    //   Signature: TAPE SATURATION on low-mids + slow pitch wobble (mud-brick walls)
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -2.0f;                         // Sumerian earthy downward bias
+        s.formantShiftSemitones  = -2.0f;                         // deeper than original
+        s.reverbAmount           = 0.40f;                         // short non-reflective mud
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 15.0f;
+        s.reverbHfDampingDb      = -8.0f;                         // mud-brick absorbs highs
+        s.chorusDepth            = 0.08f;
+        s.harmonizerAmount       = 0.12f;
+        s.distortionAmount       = 0.32f;                         // tape-saturation color (deeper)
+        s.lfo1RateHz             = 0.7f;
+        s.lfo1Depth              = 0.18f;                         // wider mud-brick wobble
+        s.lfo1Shape              = AV::LFO::Random;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.outputGain             = 0.95f;
+        makeAV(0, s);
+    }
+
+    // AV_01 Gala Priest Lament (Sumerian) — mournful castrated-priest singer
+    //   Signature: TIGHT CHORUS DOUBLING + slow grief vibrato + 2kHz cut
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -1.0f;                         // slightly low Sumerian base
+        s.formantShiftSemitones  = 2.5f;                          // gala priests: raised formants
+        s.reverbAmount           = 0.50f;                         // intimate ritual chamber
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 25.0f;
+        s.reverbHfDampingDb      = -3.0f;
+        s.chorusDepth            = 0.55f;                         // deeper tight doubling signature
+        s.harmonizerAmount       = 0.30f;
+        s.lfo1RateHz             = 4.5f;
+        s.lfo1Depth              = 0.38f;                         // deeper grief vibrato
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.dynEqMix               = 0.6f;
+        s.dynEqFreqHz            = 2000.0f;
+        s.dynEqQ                 = 1.5f;
+        s.dynEqTargetGainDb      = -4.0f;
+        s.dynEqThreshold         = 0.12f;
+        s.outputGain             = 0.92f;
+        makeAV(1, s);
+    }
+
+    // AV_02 Heliopolis Sunrise (Egyptian) — sun temple at dawn, opening ray of light
+    //   Signature: RISING PITCH + bright airy ping-pong + granular shimmer on tail
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 3.0f;                          // elevated Egyptian brightness
+        s.formantShiftSemitones  = 1.5f;                          // brighter formants
+        s.reverbAmount           = 0.95f;                         // 4.0s huge hall
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 60.0f;
+        s.reverbHfDampingDb      = 0.0f;                          // bright, no HF cut
+        s.chorusDepth            = 0.10f;
+        s.multiTapMix            = 0.70f;                         // dominant ping-pong
+        s.multiTapTimesMs[0] = 300.0f; s.multiTapGains[0] = 0.7f;  s.multiTapPans[0] = -1.0f;
+        s.multiTapTimesMs[1] = 450.0f; s.multiTapGains[1] = 0.65f; s.multiTapPans[1] = +1.0f;
+        s.granularMix            = 0.30f;                         // stronger tail shimmer
+        s.granularGrainSizeMs    = 15.0f;
+        s.granularDensity        = 15.0f;
+        s.granularPitchBaseSemi  = 12.0f;                         // octave-up sparkle
+        s.granularPitchSpreadSemi = 0.3f;
+        s.granularPositionJitter = 0.4f;
+        s.outputGain             = 0.9f;
+        makeAV(2, s);
+    }
+
+    // AV_03 Inanna's Descent Chant (Sumerian) — goddess descending to underworld
+    //   Signature: OCTAVE-DOWN + env-ducked reverb (oppressive descent pulse)
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -12.0f;                        // full octave descent
+        s.formantShiftSemitones  = -1.5f;                         // darker than sumerian base
+        s.reverbAmount           = 0.75f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 30.0f;
+        s.reverbHfDampingDb      = -6.0f;                         // pulling into dark
+        s.harmonizerAmount       = 0.50f;
+        s.distortionAmount       = 0.28f;                         // oppressive undercurrent
+        s.envFollowAttackMs      = 8.0f;
+        s.envFollowReleaseMs     = 180.0f;
+        s.envFollowDepth         = -0.75f;                        // dramatic duck = signature
+        s.envFollowDest          = AV::ModDest::ReverbWet;
+        s.outputGain             = 0.85f;
+        makeAV(3, s);
+    }
+
+    // AV_04 Ptah Hymn (Egyptian) — hymn to god of craftsmen, stone workshop
+    //   Signature: RHYTHMIC GRANULAR CHISEL + 5kHz dyn boost + metallic plate
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 1.5f;                          // Egyptian elevated
+        s.formantShiftSemitones  = 1.0f;
+        s.reverbAmount           = 0.70f;                         // dense plate
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 8.0f;
+        s.reverbHfDampingDb      = -2.0f;                         // plate stays bright
+        s.flangerRate            = 0.2f;                          // metallic sheen
+        s.chorusDepth            = 0.12f;
+        s.granularMix            = 0.55f;                         // chiseling rhythm is signature
+        s.granularGrainSizeMs    = 120.0f;
+        s.granularDensity        = 5.0f;
+        s.granularPositionJitter = 0.1f;
+        s.dynEqMix               = 0.70f;
+        s.dynEqFreqHz            = 5000.0f;
+        s.dynEqQ                 = 2.2f;
+        s.dynEqTargetGainDb      = 6.5f;                          // stronger stone sparkle
+        s.dynEqThreshold         = 0.15f;
+        s.outputGain             = 0.9f;
+        makeAV(4, s);
+    }
+
+    // AV_05 Enlil Decree (Sumerian) — god of wind/storm pronouncing judgment
+    //   Signature: AGGRESSIVE 1.5kHz PRESENCE PUSH + fast vibrato + mid-range distortion
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -3.0f;                         // deeper authoritative Sumerian
+        s.formantShiftSemitones  = -1.0f;                         // commanding lower formant
+        s.reverbAmount           = 0.55f;
+        s.distortionAmount       = 0.32f;                         // pushed mid aggression
+        s.lfo1RateHz             = 5.5f;                          // fast commanding vibrato
+        s.lfo1Depth              = 0.12f;
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.dynEqMix               = 0.85f;                         // dominant authority signature
+        s.dynEqFreqHz            = 1500.0f;
+        s.dynEqQ                 = 2.5f;
+        s.dynEqTargetGainDb      = 8.0f;                          // commanding presence
+        s.dynEqThreshold         = 0.08f;                         // always engaged
+        s.outputGain             = 0.9f;
+        makeAV(5, s);
+    }
+
+    // AV_06 Memphis Morning Rite (Egyptian) — dawn ceremony at old capital
+    //   Signature: RHYTHMIC MULTI-TAP DUAL ECHO + slow opening filter sweep
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 2.0f;                          // Egyptian elevated morning
+        s.formantShiftSemitones  = 1.0f;
+        s.reverbAmount           = 0.80f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 45.0f;
+        s.reverbHfDampingDb      = -1.0f;
+        s.multiTapMix            = 0.70f;                         // dominant rhythmic identity
+        s.multiTapTimesMs[0] = 500.0f; s.multiTapGains[0] = 0.65f; s.multiTapPans[0] = -0.6f;
+        s.multiTapTimesMs[1] = 375.0f; s.multiTapGains[1] = 0.55f; s.multiTapPans[1] = +0.6f;
+        s.multiTapTimesMs[2] = 750.0f; s.multiTapGains[2] = 0.35f; s.multiTapPans[2] = -0.2f;
+        s.chorusDepth            = 0.10f;
+        s.lfo1RateHz             = 0.08f;                          // very slow sunrise sweep
+        s.lfo1Depth              = 0.25f;                          // wider than before
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::FilterCutoff;
+        s.outputGain             = 0.9f;
+        makeAV(6, s);
+    }
+
+    // =====================================================
+    //   DRONE (AV_07 .. AV_13)
+    // =====================================================
+
+    // AV_07 Ziggurat Resonance (Sumerian) — continuous blurred pad
+    //   [session 2: enhanced reverb with long pre-delay + heavy HF damping]
+    //   [session 3: phase vocoder smear for true continuous-pad blurring]
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -7.0f;
+        s.formantShiftSemitones  = -1.0f;
+        s.reverbAmount           = 0.98f;                         // 3.0s
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 80.0f;
+        s.reverbHfDampingDb      = -8.0f;                         // floor-heavy
+        s.chorusDepth            = 0.20f;
+        s.pvSmearAmount          = 0.92f;                         // near-total smear = pad identity
+        s.pvMix                  = 0.75f;                         // dominant
+        s.lfo1RateHz             = 0.08f;
+        s.lfo1Depth              = 0.15f;
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::DelayTime;
+        s.delayAmount            = 0.30f;
+        s.outputGain             = 0.85f;
+        makeAV(7, s);
+    }
+
+    // AV_08 Nile Reed Drone (Egyptian) — papyrus reed instrument continuous buzz
+    //   Signature: 5ms GRANULAR BUZZ + narrow 800Hz resonant focus
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -3.0f;                         // reed-pitched low
+        s.formantShiftSemitones  = -2.5f;                         // nasal reed quality
+        s.reverbAmount           = 0.65f;                         // dry-ish reed focus
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 20.0f;
+        s.reverbHfDampingDb      = -4.0f;
+        s.granularMix            = 0.85f;                         // near-total reed buzz
+        s.granularGrainSizeMs    = 5.0f;
+        s.granularDensity        = 50.0f;
+        s.granularPitchSpreadSemi = 0.2f;
+        s.granularPositionJitter = 0.05f;
+        s.dynEqMix               = 0.80f;                         // dominant reed-body resonance
+        s.dynEqFreqHz            = 800.0f;
+        s.dynEqQ                 = 4.5f;                          // narrower = more vocal-tract
+        s.dynEqTargetGainDb      = 7.0f;
+        s.dynEqThreshold         = 0.04f;
+        s.outputGain             = 0.85f;
+        makeAV(8, s);
+    }
+
+    // AV_09 Abzu Deep Waters (Sumerian) — primordial underground freshwater abyss
+    //   Signature: HEAVY UNDERWATER HF CUT + very slow chorus sway + env-swelling wet
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -9.0f;                         // deeper than before
+        s.formantShiftSemitones  = -1.0f;
+        s.reverbAmount           = 0.99f;                         // 5s wash
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 40.0f;
+        s.reverbHfDampingDb      = -24.0f;                        // max underwater kill
+        s.chorusDepth            = 0.75f;                         // dominant water sway
+        s.envFollowAttackMs      = 60.0f;
+        s.envFollowReleaseMs     = 700.0f;
+        s.envFollowDepth         = 0.55f;                         // pronounced swell
+        s.envFollowDest          = AV::ModDest::ReverbWet;
+        s.outputGain             = 0.85f;
+        makeAV(9, s);
+    }
+
+    // AV_10 Duat Shadow Drone (Egyptian) — underworld realm of Osiris at night
+    //   Signature: DOMINANT REVERSE REVERB + slow formant morph (disembodied shadow)
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -6.0f;                         // deeper than before
+        s.formantShiftSemitones  = -1.5f;
+        s.reverbAmount           = 0.45f;                         // reduced — reverse dominates
+        s.reverseReverbMix       = 0.88f;                         // near-total reverse identity
+        s.reverseReverbWindowSec = 2.5f;
+        s.distortionAmount       = 0.18f;
+        s.lfo1RateHz             = 0.04f;                         // 25s slow morph
+        s.lfo1Depth              = 2.5f;                          // deeper formant swing
+        s.lfo1Shape              = AV::LFO::Triangle;
+        s.lfo1Dest               = AV::ModDest::Formant;
+        s.outputGain             = 0.82f;
+        makeAV(10, s);
+    }
+
+    // AV_11 Eridu Mud Plain (Sumerian) — barren mud plains around Sumer's first city
+    //   Signature: DRY + EMPTY FIFTH/FOURTH HARMONY STACK + windy noise bed
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -2.0f;                         // grounded
+        s.formantShiftSemitones  = -0.5f;
+        s.reverbAmount           = 0.15f;                         // nearly dry — open plain
+        s.harmonizerAmount       = 0.75f;                         // dominant empty fifth stack
+        s.chorusDepth            = 0.05f;
+        s.noiseLevel             = 0.20f;                         // pronounced wind bed
+        s.noiseColor             = AV::NoiseGenerator::Pink;
+        s.noiseHighPassHz        = 250.0f;
+        s.noiseGated             = true;
+        s.outputGain             = 0.95f;
+        makeAV(11, s);
+    }
+
+    // AV_12 Karnak Pillar Hum (Egyptian) — colossal temple column forest
+    //   Signature: MAX PRE-DELAY (pillar distance) + 120Hz sub resonance + multi-tap pillar echoes
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -11.0f;                        // deep temple bass
+        s.formantShiftSemitones  = -0.5f;
+        s.reverbAmount           = 0.99f;                         // 6s
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 200.0f;                        // maximum pillar spacing
+        s.reverbHfDampingDb      = -7.0f;
+        s.multiTapMix            = 0.55f;
+        s.multiTapTimesMs[0] = 280.0f; s.multiTapGains[0] = 0.6f; s.multiTapPans[0] = -0.8f;
+        s.multiTapTimesMs[1] = 420.0f; s.multiTapGains[1] = 0.5f; s.multiTapPans[1] = +0.8f;
+        s.dynEqMix               = 0.85f;                         // dominant sub resonance
+        s.dynEqFreqHz            = 120.0f;
+        s.dynEqQ                 = 4.0f;                          // tighter sub peak
+        s.dynEqTargetGainDb      = 9.0f;                          // massive low rumble
+        s.dynEqThreshold         = 0.03f;                         // always on
+        s.chorusDepth            = 0.15f;
+        s.outputGain             = 0.82f;
+        makeAV(12, s);
+    }
+
+    // AV_13 Marduk's Word (Akkadian/Babylonian) — supreme god's utterance
+    //   Signature: UNNATURAL +2 FORMANT (inhuman) + granular thunder + PV freeze
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -10.0f;                        // deep commanding
+        s.formantShiftSemitones  = 4.0f;                          // even more extreme unnatural
+        s.reverbAmount           = 0.85f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 70.0f;
+        s.reverbHfDampingDb      = -3.0f;
+        s.distortionAmount       = 0.22f;
+        s.granularMix            = 0.50f;                         // stronger thunder rolls
+        s.granularGrainSizeMs    = 80.0f;
+        s.granularDensity        = 7.0f;
+        s.granularPitchSpreadSemi = 0.0f;
+        s.granularReverseProb    = 0.35f;
+        s.granularPositionJitter = 0.05f;
+        s.pvFreezeAmount         = 0.65f;                         // stronger held utterance
+        s.pvMix                  = 0.40f;
+        s.outputGain             = 0.82f;
+        makeAV(13, s);
+    }
+
+    // =====================================================
+    //   CHOIR (AV_14 .. AV_20)
+    // =====================================================
+
+    // AV_14 Temple of Amun Choir (Egyptian) — massive Karnak choir of priest-singers
+    //   Signature: 4-VOICE MULTI-TAP with micro-pitch detune + bright hall
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 2.0f;                          // Egyptian elevated
+        s.formantShiftSemitones  = 1.5f;
+        s.reverbAmount           = 0.92f;                         // 4s bright
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 30.0f;
+        s.reverbHfDampingDb      = 0.0f;
+        s.harmonizerAmount       = 0.45f;
+        s.chorusDepth            = 0.40f;                         // wide voice blur
+        s.multiTapMix            = 0.85f;                         // dominant voice-stack
+        s.multiTapTimesMs[0] = 17.0f; s.multiTapGains[0] = 0.7f;  s.multiTapPans[0] = -1.0f;
+        s.multiTapTimesMs[1] = 23.0f; s.multiTapGains[1] = 0.7f;  s.multiTapPans[1] = +1.0f;
+        s.multiTapTimesMs[2] = 31.0f; s.multiTapGains[2] = 0.6f;  s.multiTapPans[2] = -0.5f;
+        s.multiTapTimesMs[3] = 41.0f; s.multiTapGains[3] = 0.6f;  s.multiTapPans[3] = +0.5f;
+        s.vocalDoublerDetuneAmount = 0.18f;                       // stronger micro-detune
+        s.vocalDoublerDelayMs    = 18.0f;
+        s.outputGain             = 0.88f;
+        makeAV(14, s);
+    }
+
+    // AV_15 Ur Nammu Assembly (Sumerian) — king's ceremonial court gathering
+    //   Signature: DOMINANT HARMONIZER FIFTH+OCTAVE + random per-voice timing jitter
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -1.5f;                         // Sumerian grounded
+        s.formantShiftSemitones  = 0.5f;
+        s.reverbAmount           = 0.65f;                         // assembly courtyard
+        s.harmonizerAmount       = 0.88f;                         // max stacked assembly voices
+        s.chorusDepth            = 0.25f;
+        s.multiTapMix            = 0.45f;
+        s.multiTapTimesMs[0] = 14.0f; s.multiTapGains[0] = 0.55f; s.multiTapPans[0] = -0.6f;
+        s.multiTapTimesMs[1] = 27.0f; s.multiTapGains[1] = 0.5f;  s.multiTapPans[1] = +0.6f;
+        s.lfo1RateHz             = 1.8f;
+        s.lfo1Depth              = 0.35f;                         // more unsynced chanting
+        s.lfo1Shape              = AV::LFO::Random;
+        s.lfo1Dest               = AV::ModDest::DelayTime;
+        s.outputGain             = 0.9f;
+        makeAV(15, s);
+    }
+
+    // AV_16 Hathor's Daughters (Egyptian) — temple priestesses, airy feminine choir
+    //   Signature: BIG FEMININE FORMANT (+3) + sine vibrato + bright air (no HF cut)
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 4.0f;                          // airy upward
+        s.formantShiftSemitones  = 3.0f;                          // strong feminine
+        s.reverbAmount           = 0.90f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 15.0f;
+        s.reverbHfDampingDb      = 0.0f;                          // sparkle preserved
+        s.chorusDepth            = 0.30f;
+        s.lfo1RateHz             = 5.0f;                          // slightly faster
+        s.lfo1Depth              = 0.45f;                         // more pronounced vibrato
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.granularMix            = 0.15f;                         // feedback shimmer
+        s.granularGrainSizeMs    = 20.0f;
+        s.granularDensity        = 10.0f;
+        s.granularPitchBaseSemi  = 12.0f;
+        s.granularPitchSpreadSemi = 0.4f;
+        s.outputGain             = 0.88f;
+        makeAV(16, s);
+    }
+
+    // AV_17 Gala Ensemble of Uruk (Sumerian) — professional cultic-song singers
+    //   Signature: 3-VOICE WIDE STEREO with micro-time staggering + strong harmonizer
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -2.5f;                         // Sumerian grounded
+        s.formantShiftSemitones  = 2.0f;                          // gala priests' raised formant
+        s.reverbAmount           = 0.60f;
+        s.harmonizerAmount       = 0.85f;                         // dominant stacking
+        s.multiTapMix            = 0.75f;                         // stronger voice spread
+        s.multiTapTimesMs[0] = 12.0f; s.multiTapGains[0] = 0.65f; s.multiTapPans[0] = -1.0f;
+        s.multiTapTimesMs[1] = 22.0f; s.multiTapGains[1] = 0.65f; s.multiTapPans[1] = +1.0f;
+        s.multiTapTimesMs[2] = 35.0f; s.multiTapGains[2] = 0.5f;  s.multiTapPans[2] = 0.0f;
+        s.chorusDepth            = 0.20f;
+        s.outputGain             = 0.88f;
+        makeAV(17, s);
+    }
+
+    // AV_18 Pharaoh's Court (Egyptian) — throne room with attendants
+    //   Signature: TIGHT MULTI-TAP BG VOICES + throne-room 3kHz presence boost + tape glue
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.5f;                          // near-neutral central
+        s.formantShiftSemitones  = 0.5f;
+        s.reverbAmount           = 0.78f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 8.0f;                          // tight
+        s.reverbHfDampingDb      = -2.0f;
+        s.multiTapMix            = 0.60f;                         // stronger BG chorus
+        s.multiTapTimesMs[0] = 20.0f; s.multiTapGains[0] = 0.6f; s.multiTapPans[0] = -1.0f;
+        s.multiTapTimesMs[1] = 30.0f; s.multiTapGains[1] = 0.6f; s.multiTapPans[1] = +1.0f;
+        s.dynEqMix               = 0.70f;                         // stronger throne presence
+        s.dynEqFreqHz            = 3000.0f;
+        s.dynEqQ                 = 1.6f;
+        s.dynEqTargetGainDb      = 4.5f;
+        s.dynEqThreshold         = 0.12f;
+        s.distortionAmount       = 0.13f;                         // tape glue
+        s.chorusDepth            = 0.10f;
+        s.outputGain             = 0.88f;
+        makeAV(18, s);
+    }
+
+    // AV_19 Nippur Gathering (Sumerian) — holy city assembly, harmonic smear
+    //   Signature: PV SMEAR DOMINANT (harmonic blur) + high-freq crowd-shuffle noise
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -2.0f;                         // Sumerian grounded
+        s.formantShiftSemitones  = 1.0f;
+        s.reverbAmount           = 0.80f;
+        s.pvSmearAmount          = 0.92f;                         // near-total harmonic blur
+        s.pvMix                  = 0.80f;                         // dominant identity
+        s.noiseLevel             = 0.10f;                         // stronger crowd shuffle
+        s.noiseColor             = AV::NoiseGenerator::White;
+        s.noiseHighPassHz        = 2500.0f;                       // tight shuffle band
+        s.noiseGated             = true;
+        s.chorusDepth            = 0.12f;
+        s.spacedOutPanAmount     = 0.75f;
+        s.spacedOutDelayTimeMs   = 45.0f;
+        s.outputGain             = 0.88f;
+        makeAV(19, s);
+    }
+
+    // AV_20 Lagash Processional (Sumerian) — ceremonial walking procession
+    //   Signature: DOMINANT DOPPLER PITCH LFO (passing-by sweep) + tight street echoes
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -1.5f;                         // Sumerian grounded
+        s.formantShiftSemitones  = -0.5f;
+        s.reverbAmount           = 0.45f;                         // narrow street
+        s.multiTapMix            = 0.35f;
+        s.multiTapTimesMs[0] = 55.0f; s.multiTapGains[0] = 0.5f; s.multiTapPans[0] = -0.8f;
+        s.multiTapTimesMs[1] = 95.0f; s.multiTapGains[1] = 0.4f; s.multiTapPans[1] = +0.8f;
+        s.lfo1RateHz             = 0.08f;                         // 12s Doppler cycle
+        s.lfo1Depth              = 1.8f;                          // deeper passing-by sweep
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.compressionRatio       = 3.5f;                          // focus on mids
+        s.outputGain             = 0.9f;
+        makeAV(20, s);
+    }
+
+    // =====================================================
+    //   RITUAL (AV_21 .. AV_28)
+    // =====================================================
+
+    // AV_21 Opening of the Mouth (Egyptian) — funerary ritual reanimating the deceased
+    //   Signature: GRANULAR LOOP-REPEATER (dead-voice echo) + tomb reflections
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 1.0f;                          // Egyptian elevated
+        s.formantShiftSemitones  = 0.5f;
+        s.reverbAmount           = 0.55f;                         // tomb interior
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 12.0f;
+        s.reverbHfDampingDb      = -4.0f;
+        s.delayAmount            = 0.25f;                         // incantation echo
+        s.granularMix            = 0.75f;                         // dominant dead-voice echo
+        s.granularGrainSizeMs    = 120.0f;
+        s.granularDensity        = 6.0f;
+        s.granularPositionJitter = 0.3f;
+        s.granularReverseProb    = 0.25f;                         // more eerie reversal
+        s.harmonizerAmount       = 0.2f;
+        s.outputGain             = 0.9f;
+        makeAV(21, s);
+    }
+
+    // AV_22 Sacred Marriage Rite (Sumerian) — Inanna-Dumuzid hieros gamos ceremony
+    //   Signature: HYPNOTIC DEEP CHORUS SWIRL + octave+fifth harmonizer stack
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -1.0f;                         // Sumerian grounded
+        s.formantShiftSemitones  = 1.5f;                          // raised sacred quality
+        s.reverbAmount           = 0.82f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 25.0f;
+        s.reverbHfDampingDb      = -2.0f;
+        s.harmonizerAmount       = 0.88f;                         // max sacred octave+fifth
+        s.chorusDepth            = 0.95f;                         // nearly max hypnotic
+        s.flangerRate            = 0.18f;
+        s.lfo1RateHz             = 0.2f;
+        s.lfo1Depth              = 0.25f;                         // deeper stereo drift
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Pan;              // hypnotic stereo drift
+        s.outputGain             = 0.88f;
+        makeAV(22, s);
+    }
+
+    // AV_23 Akitu Festival (Akkadian/Babylonian) — New Year festival of renewal
+    //   Signature: 4-TAP CHAOTIC STEREO + random pan LFO + 4.2kHz era boost
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 2.0f;                          // Akkadian elevated festival voice
+        s.formantShiftSemitones  = 0.5f;
+        s.reverbAmount           = 0.75f;
+        s.distortionAmount       = 0.38f;                         // festival drive
+        s.multiTapMix            = 0.78f;                         // dominant chaos stereo
+        s.multiTapTimesMs[0] = 120.0f; s.multiTapGains[0] = 0.65f; s.multiTapPans[0] = -1.0f;
+        s.multiTapTimesMs[1] = 185.0f; s.multiTapGains[1] = 0.6f;  s.multiTapPans[1] = +1.0f;
+        s.multiTapTimesMs[2] = 270.0f; s.multiTapGains[2] = 0.55f; s.multiTapPans[2] = -0.5f;
+        s.multiTapTimesMs[3] = 340.0f; s.multiTapGains[3] = 0.5f;  s.multiTapPans[3] = +0.5f;
+        s.lfo1RateHz             = 3.5f;
+        s.lfo1Depth              = 0.4f;                          // more random pan chaos
+        s.dynEqMix               = 0.55f;
+        s.dynEqFreqHz            = 4200.0f;                       // Akkadian era cutoff
+        s.dynEqQ                 = 1.5f;
+        s.dynEqTargetGainDb      = 5.0f;
+        s.dynEqThreshold         = 0.1f;
+        s.lfo1Shape              = AV::LFO::Random;
+        s.lfo1Dest               = AV::ModDest::Pan;
+        s.outputGain             = 0.82f;
+        makeAV(23, s);
+    }
+
+    // AV_24 Heb Sed Renewal (Egyptian) — pharaoh's jubilee rejuvenation rite
+    //   Signature: DOMINANT 20-SEC SLOW PITCH SWEEP (renewal arc) + env-ducked big tail
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -2.0f;                         // starts low, sweeps up
+        s.formantShiftSemitones  = 1.5f;                          // Egyptian bright
+        s.reverbAmount           = 0.95f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 55.0f;
+        s.reverbHfDampingDb      = -3.0f;
+        s.lfo1RateHz             = 0.04f;                         // 25s sweep — slower
+        s.lfo1Depth              = 3.0f;                          // ±3 semitones renewal arc
+        s.lfo1Shape              = AV::LFO::Triangle;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.envFollowAttackMs      = 20.0f;
+        s.envFollowReleaseMs     = 300.0f;
+        s.envFollowDepth         = -0.6f;                         // pronounced tail duck
+        s.envFollowDest          = AV::ModDest::ReverbWet;
+        s.outputGain             = 0.88f;
+        makeAV(24, s);
+    }
+
+    // AV_25 Funeral of Osiris (Egyptian) — descent of slain god into underworld
+    //   Signature: DEEPEST PITCH (-12 + -3 formant) + extreme dark wash + 12-bit decay
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -12.0f;
+        s.formantShiftSemitones  = -3.5f;                         // even deeper formant than spec
+        s.reverbAmount           = 0.99f;                         // 6s washed
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 75.0f;
+        s.reverbHfDampingDb      = -18.0f;                        // even darker wash
+        s.bitcrushMix            = 0.32f;                         // more prominent decay
+        s.bitcrushBitDepth       = 10.0f;
+        s.bitcrushSampleRateHz   = 16000.0f;
+        s.distortionAmount       = 0.12f;
+        s.chorusDepth            = 0.15f;
+        s.outputGain             = 0.78f;
+        makeAV(25, s);
+    }
+
+    // AV_26 Anointing the Shedu (Akkadian/Babylonian) — consecrating winged-bull guardian
+    //   Signature: METALLIC BRONZE-GATE PLATE + 80ms slapback + 2-4k liquid drive
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -2.5f;                         // Akkadian grounded
+        s.formantShiftSemitones  = -1.5f;                         // spec
+        s.reverbAmount           = 0.70f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 5.0f;                          // instant plate attack
+        s.reverbHfDampingDb      = 1.0f;                          // actually brighter — metallic
+        s.delayAmount            = 0.14f;                         // stronger slapback
+        s.distortionAmount       = 0.32f;                         // more liquid drive
+        s.flangerRate            = 0.4f;                          // more metallic sheen
+        s.dynEqMix               = 0.7f;
+        s.dynEqFreqHz            = 3200.0f;
+        s.dynEqQ                 = 2.2f;
+        s.dynEqTargetGainDb      = 5.5f;                          // stronger bronze edge
+        s.dynEqThreshold         = 0.1f;
+        s.outputGain             = 0.88f;
+        makeAV(26, s);
+    }
+
+    // AV_27 Libation to Enki (Sumerian) — pouring offering to god of freshwater
+    //   Signature: DENSE 2ms GRANULAR (water pouring) + dominant formant sweep LFO
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -1.5f;                         // Sumerian grounded
+        s.formantShiftSemitones  = 0.5f;
+        s.reverbAmount           = 0.75f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 25.0f;
+        s.reverbHfDampingDb      = -3.0f;
+        s.chorusDepth            = 0.40f;                         // water modulation
+        s.granularMix            = 0.65f;                         // dominant water-pour
+        s.granularGrainSizeMs    = 2.0f;
+        s.granularDensity        = 50.0f;
+        s.granularPitchSpreadSemi = 1.2f;                         // wider water color
+        s.granularPositionJitter = 0.25f;
+        s.lfo1RateHz             = 0.15f;
+        s.lfo1Depth              = 3.0f;                          // deeper formant sweep
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Formant;
+        s.outputGain             = 0.88f;
+        makeAV(27, s);
+    }
+
+    // AV_28 Offering at Edfu (Egyptian) — temple of Horus, pristine stone ritual
+    //   Signature: PRISTINE BRIGHT REVERB + strong dyn 5k boost + hard-panned doubling
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 1.5f;                          // Egyptian elevated ceremonial
+        s.formantShiftSemitones  = 0.5f;
+        s.reverbAmount           = 0.85f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 22.0f;
+        s.reverbHfDampingDb      = 1.0f;                          // actually brighter — stone
+        s.multiTapMix            = 0.45f;                         // stronger hard-panned doubling
+        s.multiTapTimesMs[0] = 13.0f; s.multiTapGains[0] = 0.65f; s.multiTapPans[0] = -1.0f;
+        s.multiTapTimesMs[1] = 17.0f; s.multiTapGains[1] = 0.65f; s.multiTapPans[1] = +1.0f;
+        s.chorusDepth            = 0.08f;
+        s.dynEqMix               = 0.85f;                         // dominant Egyptian cutoff peak
+        s.dynEqFreqHz            = 5000.0f;
+        s.dynEqQ                 = 1.8f;
+        s.dynEqTargetGainDb      = 7.5f;                          // powerful pristine sparkle
+        s.dynEqThreshold         = 0.08f;
+        s.outputGain             = 0.92f;
+        makeAV(28, s);
+    }
+
+    // =====================================================
+    //   BREATH (AV_29 .. AV_35)
+    // =====================================================
+
+    // AV_29 Reed of Ra (Egyptian) — sun god's breath through marsh reed
+    //   Signature: FAST FLANGER SWEEP on breath band + HP-isolated high air
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 2.0f;                          // reed-pitched Egyptian
+        s.formantShiftSemitones  = 1.5f;
+        s.reverbAmount           = 0.30f;                         // dry outdoor
+        s.flangerRate            = 1.2f;                          // faster breathy sweep
+        s.chorusDepth            = 0.15f;
+        s.dynEqMix               = 0.75f;                         // dominant low-body cut
+        s.dynEqFreqHz            = 400.0f;
+        s.dynEqQ                 = 2.2f;
+        s.dynEqTargetGainDb      = -9.0f;                         // severe body cut — pure breath
+        s.dynEqThreshold         = 0.04f;
+        s.noiseLevel             = 0.09f;                         // more audible high air
+        s.noiseColor             = AV::NoiseGenerator::White;
+        s.noiseHighPassHz        = 3500.0f;
+        s.noiseGated             = true;
+        s.outputGain             = 0.92f;
+        makeAV(29, s);
+    }
+
+    // AV_30 Nefertari's Whisper (Egyptian) — beloved queen's intimate utterance
+    //   Signature: OCTAVE-UP + +3 FORMANT + prominent sibilance-band pink noise (consonants)
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 12.0f;                         // octave up — feminine
+        s.formantShiftSemitones  = 3.5f;                          // stronger than before
+        s.reverbAmount           = 0.50f;                         // intimate tight
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 5.0f;                          // tight close-mic feel
+        s.reverbHfDampingDb      = -2.0f;
+        s.chorusDepth            = 0.05f;
+        s.compressionRatio       = 5.0f;                          // whispered intimacy
+        s.noiseLevel             = 0.38f;                         // max dominant sibilance
+        s.noiseColor             = AV::NoiseGenerator::Pink;
+        s.noiseHighPassHz        = 4500.0f;                       // sibilance range
+        s.noiseGated             = true;
+        s.outputGain             = 0.85f;
+        makeAV(30, s);
+    }
+
+    // AV_31 Desert Wind of Giza (Egyptian) — sandstorm howling across pyramid plateau
+    //   Signature: NEAR-FULLY-WET GRANULAR HOWL with wide random pitch + sand noise bed
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;                          // base voice preserved
+        s.formantShiftSemitones  = 0.0f;
+        s.reverbAmount           = 0.95f;                         // big outdoor space
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 45.0f;
+        s.reverbHfDampingDb      = -4.0f;
+        s.granularMix            = 0.92f;                         // near-total howl identity
+        s.granularGrainSizeMs    = 85.0f;
+        s.granularDensity        = 20.0f;
+        s.granularPitchSpreadSemi = 7.0f;                         // widest howl
+        s.granularPositionJitter = 0.98f;
+        s.granularReverseProb    = 0.4f;                          // more eerie reversal
+        s.noiseLevel             = 0.12f;                         // stronger sand bed
+        s.noiseColor             = AV::NoiseGenerator::Pink;
+        s.noiseHighPassHz        = 1000.0f;
+        s.lfo1RateHz             = 0.4f;
+        s.lfo1Depth              = 0.6f;
+        s.lfo1Shape              = AV::LFO::Random;
+        s.lfo1Dest               = AV::ModDest::FilterCutoff;
+        s.outputGain             = 0.82f;
+        makeAV(31, s);
+    }
+
+    // AV_32 Tigris Dawn Breath (Mesopotamian) — morning mist rolling over river
+    //   Signature: DOMINANT 3Hz TREMOLO + mist-like formant rise + gated low-air noise
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.5f;                          // neutral Mesopotamian
+        s.formantShiftSemitones  = 2.0f;                          // rising mist
+        s.reverbAmount           = 0.58f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 18.0f;
+        s.reverbHfDampingDb      = -5.0f;                         // soft mist
+        s.lfo1RateHz             = 3.0f;
+        s.lfo1Depth              = 0.55f;                         // deep mist-roll tremolo
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Amplitude;
+        s.noiseLevel             = 0.08f;                         // stronger river-bed noise
+        s.noiseColor             = AV::NoiseGenerator::Pink;
+        s.noiseHighPassHz        = 300.0f;                        // river bed
+        s.noiseGated             = true;
+        s.chorusDepth            = 0.12f;
+        s.outputGain             = 0.92f;
+        makeAV(32, s);
+    }
+
+    // AV_33 Papyrus Rustle (Egyptian) — crinkling of ancient scribe's paper
+    //   Signature: AGGRESSIVE TRANSIENT BOOST + high-jitter random granular crackle
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 1.0f;                          // Egyptian neutral-bright
+        s.formantShiftSemitones  = 1.0f;
+        s.reverbAmount           = 0.12f;                         // bone-dry
+        s.transientAttackDb      = 14.0f;                         // max crackling attack
+        s.transientMix           = 0.90f;                         // dominant signature
+        s.granularMix            = 0.80f;                         // max crackle presence
+        s.granularGrainSizeMs    = 12.0f;
+        s.granularDensity        = 45.0f;
+        s.granularPitchSpreadSemi = 0.5f;
+        s.granularPositionJitter = 0.95f;                         // near-full randomization
+        s.noiseLevel             = 0.10f;                         // stronger paper crackle
+        s.noiseColor             = AV::NoiseGenerator::White;
+        s.noiseHighPassHz        = 5000.0f;
+        s.noiseGated             = true;
+        s.chorusDepth            = 0.03f;
+        s.outputGain             = 0.92f;
+        makeAV(33, s);
+    }
+
+    // AV_34 Scribe's Murmur (Mesopotamian) — clay-tablet scribe muttering as he writes
+    //   Signature: DOMINANT HARD-L/R MULTI-TAP MUTTER + intimate dry + low formant
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -1.0f;                         // low neutral Mesopotamian
+        s.formantShiftSemitones  = -2.0f;                         // very low muttering quality
+        s.reverbAmount           = 0.22f;                         // tight intimate
+        s.multiTapMix            = 0.90f;                         // near-max mutter identity
+        s.multiTapTimesMs[0] = 30.0f; s.multiTapGains[0] = 0.85f; s.multiTapPans[0] = -1.0f;
+        s.multiTapTimesMs[1] = 45.0f; s.multiTapGains[1] = 0.85f; s.multiTapPans[1] = +1.0f;
+        s.compressionRatio       = 5.5f;                          // even more intimate
+        s.dynEqMix               = 0.7f;
+        s.dynEqFreqHz            = 250.0f;
+        s.dynEqQ                 = 2.0f;
+        s.dynEqTargetGainDb      = 5.0f;                          // more mumble body
+        s.dynEqThreshold         = 0.06f;
+        s.outputGain             = 0.88f;
+        makeAV(34, s);
+    }
+
+    // AV_35 Incense of Ishtar (Akkadian/Babylonian) — temple smoke rising
+    //   Signature: SLOW-BLOOM LATE REVERB + env-driven filter RISE (smoke lift)
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;                          // Akkadian neutral
+        s.formantShiftSemitones  = 1.0f;
+        s.reverbAmount           = 0.92f;                         // big slow bloom
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 150.0f;                        // even later bloom
+        s.reverbHfDampingDb      = -1.0f;
+        s.chorusDepth            = 0.25f;
+        s.envFollowAttackMs      = 200.0f;
+        s.envFollowReleaseMs     = 800.0f;                        // slower rise
+        s.envFollowDepth         = 0.85f;                         // near-max rising smoke
+        s.envFollowDest          = AV::ModDest::FilterCutoff;
+        s.granularMix            = 0.28f;                         // stronger smoke shimmer
+        s.granularGrainSizeMs    = 25.0f;
+        s.granularDensity        = 10.0f;
+        s.granularPitchBaseSemi  = 7.0f;                          // drifting fifth
+        s.granularPitchSpreadSemi = 0.3f;
+        s.outputGain             = 0.88f;
+        makeAV(35, s);
+    }
+
+    // =====================================================
+    //   SHIMMER (AV_36 .. AV_42)
+    // =====================================================
+
+    // AV_36 Hathor's Sistrum (Egyptian) — goddess's ritual metallic rattle
+    //   Signature: EXTREME-SPEED GRANULAR SHAKE + bright +7 pitch + rattle dyn EQ
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 7.0f;
+        s.formantShiftSemitones  = 2.0f;                          // stronger bright
+        s.reverbAmount           = 0.72f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 12.0f;
+        s.reverbHfDampingDb      = 1.0f;                          // brighter — metallic
+        s.granularMix            = 0.88f;                         // max sistrum rattle
+        s.granularGrainSizeMs    = 5.0f;                          // even shorter — faster shake
+        s.granularDensity        = 48.0f;
+        s.granularPitchSpreadSemi = 3.5f;
+        s.granularPositionJitter = 0.7f;
+        s.dynEqMix               = 0.70f;                         // stronger rattle band
+        s.dynEqFreqHz            = 6500.0f;
+        s.dynEqQ                 = 3.2f;
+        s.dynEqTargetGainDb      = 7.0f;
+        s.dynEqThreshold         = 0.06f;
+        s.distortionAmount       = 0.15f;
+        s.outputGain             = 0.88f;
+        makeAV(36, s);
+    }
+
+    // AV_37 Stars of Nut (Egyptian) — stars on goddess's body, celestial twinkle
+    //   Signature: +12 PITCH + PRIME-NUMBER 4-TAP MATRIX (un-synced twinkling stars)
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 12.0f;
+        s.formantShiftSemitones  = 1.0f;
+        s.reverbAmount           = 0.95f;                         // 4.5s pristine celestial
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 30.0f;
+        s.reverbHfDampingDb      = 0.0f;                          // bright
+        s.multiTapMix            = 0.80f;                         // dominant twinkle matrix
+        s.multiTapTimesMs[0] = 317.0f; s.multiTapGains[0] = 0.65f; s.multiTapPans[0] = -0.8f;
+        s.multiTapTimesMs[1] = 439.0f; s.multiTapGains[1] = 0.60f; s.multiTapPans[1] = +0.8f;
+        s.multiTapTimesMs[2] = 601.0f; s.multiTapGains[2] = 0.55f; s.multiTapPans[2] = -0.4f;
+        s.multiTapTimesMs[3] = 751.0f; s.multiTapGains[3] = 0.50f; s.multiTapPans[3] = +0.4f;
+        s.harmonizerAmount       = 0.55f;                         // stronger octave stack
+        s.outputGain             = 0.88f;
+        makeAV(37, s);
+    }
+
+    // AV_38 Lapis of Inanna (Sumerian) — sacred blue stone of the goddess
+    //   Signature: HIGH PV FREEZE (crystalline sustained pad) + fifth pitch + airy
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 5.0f;                          // fifth up
+        s.formantShiftSemitones  = 2.5f;                          // strong crystalline quality
+        s.reverbAmount           = 0.85f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 20.0f;
+        s.reverbHfDampingDb      = 0.0f;                          // crystalline brightness
+        s.pvFreezeAmount         = 0.95f;                         // near-total freeze pad
+        s.pvMix                  = 0.80f;                         // dominant
+        s.chorusDepth            = 0.18f;
+        s.outputGain             = 0.88f;
+        makeAV(38, s);
+    }
+
+    // AV_39 Gilded Mask of Tut (Egyptian) — Tutankhamun's golden death mask
+    //   Signature: STRONG 2kHz GOLDEN PEAK + fast bronze flanger + tight plate
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 3.0f;                          // Egyptian elevated
+        s.formantShiftSemitones  = 2.0f;                          // stronger gilded quality
+        s.reverbAmount           = 0.55f;                         // tight plate
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 4.0f;                          // instant plate
+        s.reverbHfDampingDb      = 2.0f;                          // actually brighter
+        s.dynEqMix               = 0.90f;                         // max dominant golden peak
+        s.dynEqFreqHz            = 2000.0f;
+        s.dynEqQ                 = 3.0f;                          // tighter, more metallic
+        s.dynEqTargetGainDb      = 10.0f;                         // max harsh golden
+        s.dynEqThreshold         = 0.05f;
+        s.flangerRate            = 3.0f;                          // faster bronze sheen
+        s.distortionAmount       = 0.15f;
+        s.outputGain             = 0.85f;
+        makeAV(39, s);
+    }
+
+    // AV_40 Sunboat of Ra (Egyptian) — sun god's vessel crossing the sky
+    //   Signature: EXTREME WIDE STEREO + fifth harmonizer stack + burning-heat saturation
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 8.0f;                          // radiant upward
+        s.formantShiftSemitones  = 1.5f;
+        s.reverbAmount           = 0.93f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 35.0f;
+        s.reverbHfDampingDb      = -1.0f;
+        s.harmonizerAmount       = 0.70f;                         // stronger fifth stack
+        s.flangerRate            = 0.6f;                          // faster phaser sweep
+        s.distortionAmount       = 0.42f;                         // more burning tape sat
+        s.multiTapMix            = 0.65f;                         // stronger width
+        s.multiTapTimesMs[0] = 60.0f;  s.multiTapGains[0] = 0.7f;  s.multiTapPans[0] = -1.0f;
+        s.multiTapTimesMs[1] = 95.0f;  s.multiTapGains[1] = 0.7f;  s.multiTapPans[1] = +1.0f;
+        s.multiTapTimesMs[2] = 140.0f; s.multiTapGains[2] = 0.55f; s.multiTapPans[2] = -0.5f;
+        s.outputGain             = 0.85f;
+        makeAV(40, s);
+    }
+
+    // AV_41 Crystal of Utu (Sumerian) — sun god's radiant crystal
+    //   Signature: DOMINANT 1200Hz COMB FILTER (crystalline spikes) + pitch-up granular
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 12.0f;                         // octave up — radiant
+        s.formantShiftSemitones  = 1.5f;
+        s.reverbAmount           = 0.78f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 18.0f;
+        s.reverbHfDampingDb      = 0.0f;                          // crystalline bright
+        s.combFreqHz             = 1200.0f;
+        s.combFeedback           = 0.88f;                         // extreme resonance
+        s.combMix                = 0.72f;                         // dominant crystal
+        s.chorusDepth            = 0.15f;
+        s.granularMix            = 0.2f;                          // subtle crystal breath
+        s.granularGrainSizeMs    = 12.0f;
+        s.granularDensity        = 12.0f;
+        s.granularPitchBaseSemi  = 12.0f;
+        s.granularReverseProb    = 0.4f;                          // reversed crystalline
+        s.outputGain             = 0.88f;
+        makeAV(41, s);
+    }
+
+    // AV_42 Ziggurat at Dawn (Sumerian) — stepped temple pyramid catching first light
+    //   Signature: DOMINANT SLOW PAN SWEEP + env-driven filter opening over time
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 6.0f;                          // elevated dawn brightness
+        s.formantShiftSemitones  = 1.0f;
+        s.reverbAmount           = 0.82f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 40.0f;                         // stepped temple distance
+        s.reverbHfDampingDb      = -3.0f;
+        s.lfo1RateHz             = 0.06f;                         // 16s pan — slower wider
+        s.lfo1Depth              = 1.0f;
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Pan;
+        s.envFollowAttackMs      = 400.0f;
+        s.envFollowReleaseMs     = 1200.0f;
+        s.envFollowDepth         = 0.80f;                         // dramatic filter opening
+        s.envFollowDest          = AV::ModDest::FilterCutoff;
+        s.chorusDepth            = 0.18f;
+        s.outputGain             = 0.92f;
+        makeAV(42, s);
+    }
+
+    // =====================================================
+    //   DARK (AV_43 .. AV_49)
+    // =====================================================
+
+    // AV_43 Kur Descent (Sumerian) — falling into the underworld abyss
+    //   Signature: OCTAVE-DOWN + EXTREME HF KILL + ULTRA-DARK VOID (no sparkle at all)
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -12.0f;                        // octave descent
+        s.formantShiftSemitones  = -4.0f;                         // deeper than before
+        s.reverbAmount           = 0.99f;                         // 5s void
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 60.0f;
+        s.reverbHfDampingDb      = -28.0f;                        // absolute void — maximum kill
+        s.distortionAmount       = 0.10f;
+        s.envFollowAttackMs      = 30.0f;
+        s.envFollowReleaseMs     = 1000.0f;
+        s.envFollowDepth         = -0.70f;                        // dramatic tail collapse
+        s.envFollowDest          = AV::ModDest::ReverbWet;
+        s.outputGain             = 0.78f;
+        makeAV(43, s);
+    }
+
+    // AV_44 Ereshkigal's Throne (Sumerian) — queen of the underworld on her throne
+    //   Signature: DOMINANT REVERSE REVERB + heavy throne-room distortion + fifth-down harmonizer
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -7.0f;                         // fifth down
+        s.formantShiftSemitones  = -2.0f;                         // lower than before
+        s.reverbAmount           = 0.40f;                         // reduced — reverse dominates
+        s.reverseReverbMix       = 0.92f;                         // total reverse-reverb identity
+        s.reverseReverbWindowSec = 3.0f;                          // longer window
+        s.distortionAmount       = 0.55f;                         // stronger throne menace
+        s.harmonizerAmount       = 0.60f;                         // stronger downward stack
+        s.delayAmount            = 0.35f;
+        s.outputGain             = 0.8f;
+        makeAV(44, s);
+    }
+
+    // AV_45 Tomb of Seti (Egyptian) — sealed pharaoh's burial chamber
+    //   Signature: DOMINANT COMB FILTER @ 350Hz (hollow cancellation) + 10Hz motor growl
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -2.0f;                         // near-neutral Egyptian tomb
+        s.formantShiftSemitones  = -3.0f;                         // even lower than before
+        s.reverbAmount           = 0.85f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 3.0f;                          // instant sealed-box
+        s.reverbHfDampingDb      = -8.0f;                         // sealed stone darkness
+        s.combFreqHz             = 350.0f;
+        s.combFeedback           = 0.85f;                         // extreme hollow
+        s.combMix                = 0.72f;                         // dominant identity
+        s.distortionAmount       = 0.35f;
+        s.lfo1RateHz             = 12.0f;                         // faster motor
+        s.lfo1Depth              = 0.32f;                         // stronger growl
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Amplitude;
+        s.outputGain             = 0.82f;
+        makeAV(45, s);
+    }
+
+    // AV_46 Apep Rising (Egyptian) — chaos serpent coiling to swallow the sun
+    //   Signature: DOMINANT WRITHING ±OCTAVE PITCH LFO + aggressive soft-clip + dyn boost low-mids
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;                          // pitch LFO does the work
+        s.formantShiftSemitones  = -1.0f;
+        s.reverbAmount           = 0.82f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 30.0f;
+        s.reverbHfDampingDb      = -4.0f;
+        s.distortionAmount       = 0.58f;                         // even more soft-clip
+        s.lfo1RateHz             = 0.07f;
+        s.lfo1Depth              = 18.0f;                         // MAX writhing — ±18 semitones
+        s.lfo1Shape              = AV::LFO::Triangle;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.dynEqMix               = 0.75f;
+        s.dynEqFreqHz            = 220.0f;
+        s.dynEqQ                 = 1.8f;
+        s.dynEqTargetGainDb      = 6.5f;                          // stronger snake body
+        s.dynEqThreshold         = 0.06f;
+        s.outputGain             = 0.78f;
+        makeAV(46, s);
+    }
+
+    // AV_47 Lamashtu (Akkadian/Babylonian) — she-demon who preys on infants
+    //   Signature: VIOLENT RANDOM PITCH STABS + 8-bit aliasing + screeching high
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 12.0f;                         // demonic upward
+        s.formantShiftSemitones  = 2.5f;                          // stronger unnatural
+        s.reverbAmount           = 0.50f;                         // damped
+        s.lfo1RateHz             = 12.0f;                         // even faster violent stabs
+        s.lfo1Depth              = 4.0f;                          // ±4 semi — max demonic
+        s.lfo1Shape              = AV::LFO::Random;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.bitcrushMix            = 0.60f;                         // max dominant aliasing
+        s.bitcrushBitDepth       = 6.0f;                          // harsher 6-bit
+        s.bitcrushSampleRateHz   = 12000.0f;
+        s.distortionAmount       = 0.40f;
+        s.outputGain             = 0.75f;
+        makeAV(47, s);
+    }
+
+    // AV_48 Nergal's Gate (Akkadian/Babylonian) — gate of plague and underworld war
+    //   Signature: PV FREEZE on transients (held divine wrath) + booming multi-tap gates
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -4.0f;                         // commanding but not deepest
+        s.formantShiftSemitones  = 1.0f;                          // polar Akkadian bright
+        s.reverbAmount           = 0.92f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 55.0f;
+        s.reverbHfDampingDb      = -2.0f;
+        s.pvFreezeAmount         = 0.90f;                         // max held divine wrath
+        s.pvMix                  = 0.65f;
+        s.multiTapMix            = 0.75f;                         // stronger booming gates
+        s.multiTapTimesMs[0] = 500.0f; s.multiTapGains[0] = 0.75f; s.multiTapPans[0] = -0.8f;
+        s.multiTapTimesMs[1] = 250.0f; s.multiTapGains[1] = 0.7f;  s.multiTapPans[1] = +0.8f;
+        s.multiTapTimesMs[2] = 750.0f; s.multiTapGains[2] = 0.55f; s.multiTapPans[2] = -0.3f;
+        s.bitcrushMix            = 0.15f;                         // more corruption
+        s.bitcrushBitDepth       = 10.0f;
+        s.bitcrushSampleRateHz   = 22000.0f;
+        s.flangerRate            = 0.25f;
+        s.distortionAmount       = 0.22f;
+        s.outputGain             = 0.82f;
+        makeAV(48, s);
+    }
+
+    // AV_49 Pazuzu (Akkadian/Babylonian) — demon-king of wind storms, locusts, fevers
+    //   Signature: EXTREME -4 FORMANT (inhuman swarm) + dominant 2ms granular + dark wind bed
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -2.0f;                         // low but not deepest
+        s.formantShiftSemitones  = -5.0f;                         // even more inhuman
+        s.reverbAmount           = 0.48f;                         // dry oppressive close
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 0.0f;                          // no space — in-your-face
+        s.reverbHfDampingDb      = -6.0f;
+        s.chorusDepth            = 0.98f;                         // near-max swarm voicing
+        s.granularMix            = 0.80f;                         // dominant choking
+        s.granularGrainSizeMs    = 2.0f;
+        s.granularDensity        = 50.0f;                         // max choking density
+        s.granularPitchSpreadSemi = 4.0f;                         // wider swarm
+        s.granularPositionJitter = 0.85f;
+        s.granularReverseProb    = 0.35f;
+        s.noiseLevel             = 0.25f;                         // max wind bed
+        s.noiseColor             = AV::NoiseGenerator::Pink;
+        s.noiseHighPassHz        = 80.0f;
+        s.distortionAmount       = 0.48f;                         // more grit
+        s.flangerRate            = 2.0f;
+        s.outputGain             = 0.75f;
+        makeAV(49, s);
     }
 }
 void AncientVoicesAudioProcessor::applyProfileEffects(juce::AudioBuffer<float>& buffer)
@@ -1034,16 +2032,65 @@ void AncientVoicesAudioProcessor::applyProfileEffects(juce::AudioBuffer<float>& 
                    //DBG("Initialized RubberBand stretcher.");
                }
 
+               // ----------------------------------------------------
+               //  SESSION 1: Formant / LFO / EnvFollower / ModMatrix
+               // ----------------------------------------------------
+               // Configure modules from the current profile each block
+               // (cheap — just setters, no allocation).
+               formantShifter.setShiftSemitones (currentProfile.formantShiftSemitones);
+
+               lfo1.setRateHz (currentProfile.lfo1RateHz);
+               lfo1.setDepth  (currentProfile.lfo1Depth);
+               lfo1.setShape  (currentProfile.lfo1Shape);
+
+               envFollower.setAttackMs  (currentProfile.envFollowAttackMs);
+               envFollower.setReleaseMs (currentProfile.envFollowReleaseMs);
+               envFollower.setDepth     (currentProfile.envFollowDepth);
+
+               // Sample modulation sources this block
+               AV::ModSources srcs;
+               srcs.lfo1Dest      = currentProfile.lfo1Dest;
+               srcs.envFollowDest = currentProfile.envFollowDest;
+               srcs.lfo1          = lfo1.tickBlock (buffer.getNumSamples());
+               srcs.envFollow     = envFollower.processBlock (buffer);
+               const auto modded  = AV::ModMatrix::apply (srcs);
+
+               // Apply formant BEFORE pitch shift (so it's truly independent of the
+               // speed-of-sound pitch manipulation). Zero-shift is an early-out inside.
+               // Combine preset formant with formant-destined modulation.
+               if (std::fabs (currentProfile.formantShiftSemitones + modded.formantOffsetSemi) > 0.01f)
+               {
+                   formantShifter.setShiftSemitones (currentProfile.formantShiftSemitones + modded.formantOffsetSemi);
+                   formantShifter.process (buffer);
+               }
+
                // Combine preset pitch with user-knob pitch offset, clamp to ±24st
-               float pitchShiftAmount = currentProfile.pitchShiftAmount;
+               float pitchShiftAmount = currentProfile.pitchShiftAmount + modded.pitchOffsetSemi;
                if (userPitch != nullptr)
                    pitchShiftAmount += userPitch->load();
                pitchShiftAmount = juce::jlimit(-24.0f, 24.0f, pitchShiftAmount);
-               //DBG("Pitch Shift Amount (preset+user, clamped): " << pitchShiftAmount);
+               //DBG("Pitch Shift Amount (preset+user+mod, clamped): " << pitchShiftAmount);
 
                // Process pitch shifting
                //DBG("Applying Pitch Shift...");
                applyRubberBandPitchShift(buffer, pitchShiftAmount);
+
+               // Apply amplitude modulation (tremolo) per block if destined
+               if (std::fabs (modded.amplitudeMul - 1.0f) > 0.001f)
+               {
+                   buffer.applyGain (juce::jlimit (0.0f, 2.0f, modded.amplitudeMul));
+               }
+
+               // Apply stereo pan offset (simple L/R gain) if destined
+               if (std::fabs (modded.panOffset) > 0.001f && buffer.getNumChannels() >= 2)
+               {
+                   const float p = juce::jlimit (-1.0f, 1.0f, modded.panOffset);
+                   // Equal-power-ish: left gets (1-p)/2-ish, right gets (1+p)/2-ish
+                   const float lGain = std::sqrt (juce::jlimit (0.0f, 1.0f, 0.5f - 0.5f * p));
+                   const float rGain = std::sqrt (juce::jlimit (0.0f, 1.0f, 0.5f + 0.5f * p));
+                   buffer.applyGain (0, 0, buffer.getNumSamples(), lGain * 1.414f);
+                   buffer.applyGain (1, 0, buffer.getNumSamples(), rGain * 1.414f);
+               }
 
         // Harmonizer effect: Only applied if the harmonizer amount is greater than 0
         //DBG("Starting applyProfileEffects...Harmonizer Effect");
@@ -1133,8 +2180,21 @@ void AncientVoicesAudioProcessor::applyProfileEffects(juce::AudioBuffer<float>& 
             //DBG("Skipping delay because amount is 0.");
         }
 
-        // Reverb: Adds space and depth by simulating room reflections
-        if (currentProfile.reverbAmount > 0.0f)
+        // Reverb: Adds space and depth by simulating room reflections.
+        // When useEnhancedReverb is true, route through EnhancedReverb instead
+        // for pre-delay + HF damping; otherwise use the existing basic reverb.
+        if (currentProfile.useEnhancedReverb && currentProfile.reverbAmount > 0.0f)
+        {
+            enhancedReverb.setRoomSize (juce::jlimit (0.0f, 1.0f, currentProfile.reverbAmount));
+            enhancedReverb.setDamping  (0.5f);
+            enhancedReverb.setWidth    (1.0f);
+            enhancedReverb.setWetLevel (currentProfile.reverbAmount);
+            enhancedReverb.setDryLevel (1.0f - currentProfile.reverbAmount * 0.5f);
+            enhancedReverb.setPreDelayMs (currentProfile.reverbPreDelayMs);
+            enhancedReverb.setHfDampingDb (currentProfile.reverbHfDampingDb);
+            enhancedReverb.process (buffer);
+        }
+        else if (currentProfile.reverbAmount > 0.0f)
         {
             //DBG("Applying reverb with amount: " << currentProfile.reverbAmount);
             applyReverbEffect(buffer, currentProfile.reverbAmount);
@@ -1142,6 +2202,89 @@ void AncientVoicesAudioProcessor::applyProfileEffects(juce::AudioBuffer<float>& 
         else
         {
             //DBG("Skipping reverb because amount is 0.");
+        }
+
+        // --- Session 2: multi-tap delay, comb filter, reverse reverb ---
+        if (currentProfile.multiTapMix > 0.0f)
+        {
+            multiTap.setMix (currentProfile.multiTapMix);
+            for (int t = 0; t < AV::MultiTapDelay::kMaxTaps; ++t)
+                multiTap.setTap (t,
+                                 currentProfile.multiTapTimesMs[t],
+                                 currentProfile.multiTapGains[t],
+                                 currentProfile.multiTapPans[t]);
+            multiTap.process (buffer);
+        }
+
+        if (currentProfile.combMix > 0.0f && currentProfile.combFreqHz > 0.0f)
+        {
+            combFilter.setFrequencyHz (currentProfile.combFreqHz);
+            combFilter.setFeedback    (currentProfile.combFeedback);
+            combFilter.setMix         (currentProfile.combMix);
+            combFilter.process (buffer);
+        }
+
+        if (currentProfile.reverseReverbMix > 0.0f)
+        {
+            reverseReverb.setWindowSec (currentProfile.reverseReverbWindowSec);
+            reverseReverb.setMix       (currentProfile.reverseReverbMix);
+            reverseReverb.process (buffer);
+        }
+
+        // --- Session 3: phase vocoder, granular, bitcrusher, dyn EQ,
+        //     noise, transient shaper ---
+        if (currentProfile.transientMix > 0.0f)
+        {
+            transientShaper.setAttackBoostDb (currentProfile.transientAttackDb);
+            transientShaper.setMix           (currentProfile.transientMix);
+            transientShaper.process (buffer);
+        }
+
+        if (currentProfile.pvMix > 0.0f)
+        {
+            phaseVocoder.setFreezeAmount (currentProfile.pvFreezeAmount);
+            phaseVocoder.setSmearAmount  (currentProfile.pvSmearAmount);
+            phaseVocoder.setMix          (currentProfile.pvMix);
+            phaseVocoder.process (buffer);
+        }
+
+        if (currentProfile.granularMix > 0.0f && currentProfile.granularDensity > 0.0f)
+        {
+            granular.setGrainSizeMs     (currentProfile.granularGrainSizeMs);
+            granular.setDensity         (currentProfile.granularDensity);
+            granular.setPitchSpreadSemi (currentProfile.granularPitchSpreadSemi);
+            granular.setPitchBaseOffset (currentProfile.granularPitchBaseSemi);
+            granular.setReverseProb     (currentProfile.granularReverseProb);
+            granular.setPositionJitter  (currentProfile.granularPositionJitter);
+            granular.setMix             (currentProfile.granularMix);
+            granular.process (buffer);
+        }
+
+        if (currentProfile.dynEqMix > 0.0f)
+        {
+            dynamicEq.setFrequency    (currentProfile.dynEqFreqHz);
+            dynamicEq.setQ            (currentProfile.dynEqQ);
+            dynamicEq.setTargetGainDb (currentProfile.dynEqTargetGainDb);
+            dynamicEq.setThreshold    (currentProfile.dynEqThreshold);
+            dynamicEq.setMix          (currentProfile.dynEqMix);
+            dynamicEq.process (buffer);
+        }
+
+        if (currentProfile.bitcrushMix > 0.0f)
+        {
+            bitcrusher.setBitDepth     (currentProfile.bitcrushBitDepth);
+            bitcrusher.setSampleRateHz (currentProfile.bitcrushSampleRateHz);
+            bitcrusher.setMix          (currentProfile.bitcrushMix);
+            bitcrusher.process (buffer);
+        }
+
+        if (currentProfile.noiseLevel > 0.0f)
+        {
+            noiseGen.setColor        (currentProfile.noiseColor);
+            noiseGen.setLevel        (currentProfile.noiseLevel);
+            noiseGen.setHighPassHz   (currentProfile.noiseHighPassHz);
+            noiseGen.setGated        (currentProfile.noiseGated);
+            noiseGen.process (buffer);
         }
 
         // New Effects

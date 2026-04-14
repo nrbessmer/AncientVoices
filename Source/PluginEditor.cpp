@@ -22,6 +22,10 @@ namespace AVTheme
     static const juce::Colour textDark     = juce::Colour::fromRGB( 25,  45,  35);
     static const juce::Colour panelWhite   = juce::Colours::white;
     static const juce::Colour panelBorder  = juce::Colour::fromRGB(200, 220, 210);
+    // Burnt orange accent palette — used for titles, preset display, footer link.
+    static const juce::Colour burntOrange      = juce::Colour::fromRGB(204,  85,   0);
+    static const juce::Colour burntOrangeDark  = juce::Colour::fromRGB(153,  64,   0);
+    static const juce::Colour burntOrangeLight = juce::Colour::fromRGB(230, 130,  50);
 }
 
 static const char* publicKeyPEM = R"(
@@ -104,7 +108,7 @@ AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoic
 
     titleLabel.setText("ANCIENT VOICES", juce::dontSendNotification);
     titleLabel.setFont(juce::Font("Helvetica Neue", 30.0f, juce::Font::bold));
-    titleLabel.setColour(juce::Label::textColourId, AVTheme::accentDark);
+    titleLabel.setColour(juce::Label::textColourId, AVTheme::burntOrange);
     titleLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(titleLabel);
 
@@ -132,7 +136,7 @@ AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoic
     addAndMakeVisible(presetCombo);
 
     profileDisplayLabel.setFont(juce::Font("Helvetica Neue", 26.0f, juce::Font::bold));
-    profileDisplayLabel.setColour(juce::Label::textColourId, AVTheme::accentGreen);
+    profileDisplayLabel.setColour(juce::Label::textColourId, AVTheme::burntOrange);
     profileDisplayLabel.setJustificationType(juce::Justification::centred);
     profileDisplayLabel.setText("Alpha", juce::dontSendNotification);
     addAndMakeVisible(profileDisplayLabel);
@@ -160,11 +164,20 @@ AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoic
     waveformDisplay->setColours(AVTheme::panelWhite, AVTheme::accentGreen);
     addAndMakeVisible(*waveformDisplay);
 
-    footerLabel.setText("(c)(p) 2026 Tully EDM Vibe", juce::dontSendNotification);
+    footerLabel.setText("\xc2\xa9 \xe2\x93\x85 2026 Tully EDM Vibe  \xe2\x80\x94  ",
+                        juce::dontSendNotification);
     footerLabel.setFont(juce::Font("Helvetica Neue", 10.0f, juce::Font::plain));
-    footerLabel.setColour(juce::Label::textColourId, AVTheme::textDark.withAlpha(0.5f));
-    footerLabel.setJustificationType(juce::Justification::centred);
+    footerLabel.setColour(juce::Label::textColourId, AVTheme::textDark.withAlpha(0.6f));
+    footerLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(footerLabel);
+
+    footerEmailLink.setButtonText("info@tullyedmvibe.com");
+    footerEmailLink.setURL(juce::URL("mailto:info@tullyedmvibe.com"));
+    footerEmailLink.setFont(juce::Font("Helvetica Neue", 10.0f, juce::Font::plain), false,
+                            juce::Justification::centredLeft);
+    footerEmailLink.setColour(juce::HyperlinkButton::textColourId, AVTheme::burntOrange);
+    footerEmailLink.setTooltip("Send email to info@tullyedmvibe.com");
+    addAndMakeVisible(footerEmailLink);
 
     startTimerHz(20);
     setSize(900, 680);
@@ -177,8 +190,12 @@ void AncientVoicesAudioProcessorEditor::populatePresetCombo()
     using namespace AncientVoicesPresets;
     presetCombo.clear(juce::dontSendNotification);
     presetCombo.addSectionHeading("MisterMultiVox Originals");
-    for (int i = 0; i < kMmvProfileCount; ++i)
-        presetCombo.addItem(getMmvProfileName(i), i + 1);
+    for (int i = 0; i < kMmvProfileCount; ++i) {
+        juce::String itemText = juce::String(getMmvProfileName(i))
+                              + "  \xe2\x80\x94  "
+                              + getMmvProfileDescription(i);
+        presetCombo.addItem(itemText, i + 1);
+    }
     Category lastCategory = Category::Chant;
     bool firstInGroup = true;
     for (int i = 0; i < kAvPresetCount; ++i) {
@@ -188,7 +205,10 @@ void AncientVoicesAudioProcessorEditor::populatePresetCombo()
             lastCategory = pr.category;
             firstInGroup = false;
         }
-        presetCombo.addItem(pr.name, pr.globalIndex + 1);
+        juce::String itemText = juce::String(pr.name)
+                              + "  \xe2\x80\x94  "
+                              + getPresetDescription(i);
+        presetCombo.addItem(itemText, pr.globalIndex + 1);
     }
 }
 
@@ -311,7 +331,16 @@ void AncientVoicesAudioProcessorEditor::resized()
 
     area.removeFromTop(8);
 
-    footerLabel.setBounds(area.removeFromBottom(18));
+    auto footerRow = area.removeFromBottom(18);
+    // Approx width of "© ℗ 2026 Tully EDM Vibe  —  " so email sits naturally adjacent
+    const int copyrightWidth = 180;
+    const int totalWidth     = footerRow.getWidth();
+    const int emailWidth     = 150;
+    const int combinedWidth  = copyrightWidth + emailWidth;
+    const int leftMargin     = juce::jmax(0, (totalWidth - combinedWidth) / 2);
+    footerRow.removeFromLeft(leftMargin);
+    footerLabel.setBounds(footerRow.removeFromLeft(copyrightWidth));
+    footerEmailLink.setBounds(footerRow.removeFromLeft(emailWidth));
     area.removeFromBottom(6);
 
     if (waveformDisplay != nullptr)
@@ -327,8 +356,8 @@ void AncientVoicesAudioProcessorEditor::paint(juce::Graphics& g)
 
     g.setColour(AVTheme::accentGreen);
     g.fillRect(0, 0, getWidth(), 5);
-    g.setColour(AVTheme::accentGreen.withAlpha(0.5f));
-    g.fillRect(0, getHeight() - 2, getWidth(), 2);
+    g.setColour(AVTheme::burntOrange);
+    g.fillRect(0, getHeight() - 3, getWidth(), 3);
 
     if (waveformDisplay != nullptr) {
         auto wb = waveformDisplay->getBounds().expanded(5);

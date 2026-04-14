@@ -167,4 +167,90 @@ namespace AncientVoicesPresets
         jassert(mmvIndex >= 0 && mmvIndex < kMmvProfileCount);
         return names[mmvIndex];
     }
+
+    // Short, evocative description for each MMV profile (shown in picklist).
+    inline const char* getMmvProfileDescription(int mmvIndex)
+    {
+        static const char* descs[kMmvProfileCount] = {
+            "Power vocal - enhanced clarity",
+            "Dreamscape - ethereal ambient",
+            "Glitch riser - rhythmic buildup",
+            "Deep bass vox - sub-heavy vocal",
+            "Hardstyle shout - aggressive shout",
+            "Vocal synth - robotic synthetic tone",
+            "EDM riser - pitch-rising tension",
+            "Telephone vox - bandwidth-limited",
+            "Robot vocal - mechanical harmonizer",
+            "Breakdown FX - stuttered breakdown"
+        };
+        jassert(mmvIndex >= 0 && mmvIndex < kMmvProfileCount);
+        return descs[mmvIndex];
+    }
+
+    // Short, evocative description for each AV preset (shown in picklist).
+    // Each describes the preset's signature character in 4-8 words.
+    inline const char* getPresetDescription(int avIndex)
+    {
+        static const char* descs[kAvPresetCount] = {
+            // CHANT
+            "First-city invocation, tape-saturated mud-brick voice",
+            "Mournful priest lament, tight chorus + grief vibrato",
+            "Dawn sun-temple, bright ping-pong with tail shimmer",
+            "Goddess descent, octave-down with oppressive pulse",
+            "Stone-workshop hymn, rhythmic chiseling granular",
+            "Storm-god decree, authoritative 1.5kHz presence push",
+            "Morning temple rite, rhythmic multi-tap echoes",
+            // DRONE
+            "Ziggurat sustained pad, heavy phase-vocoder smear",
+            "Nile reed buzz, dense 5ms granular + reed resonance",
+            "Primordial freshwater abyss, underwater HF kill",
+            "Underworld shadow, dominant reverse reverb morph",
+            "Barren plains, empty harmony stack + wind bed",
+            "Karnak pillar hum, extreme pre-delay + sub resonance",
+            "Supreme god's utterance, unnatural formant + held voice",
+            // CHOIR
+            "Karnak priest choir, 4-voice micro-detuned stereo stack",
+            "Royal ceremonial assembly, dominant harmonizer stack",
+            "Temple priestesses, feminine +3 formant with vibrato",
+            "Cultic-song ensemble, 3-voice wide stereo spread",
+            "Throne room with attendants, tight BG voices + tape",
+            "Holy city gathering, harmonic smear + crowd shuffle",
+            "Ceremonial procession, Doppler pitch LFO sweep",
+            // RITUAL
+            "Funerary reanimation rite, granular loop-repeater echo",
+            "Sacred marriage ceremony, hypnotic chorus swirl",
+            "New Year festival, chaotic 4-tap stereo + era boost",
+            "Pharaoh's jubilee, 25-sec pitch arc + ducked tail",
+            "Slain god's descent, extreme dark wash + bitcrush",
+            "Winged-bull anointing, bronze-gate plate + slapback",
+            "Offering to water god, dense 2ms pour + formant sweep",
+            "Temple of Horus rite, pristine 5kHz dynamic peak",
+            // BREATH
+            "Sun god's reed breath, flanger sweep + high air",
+            "Queen's intimate whisper, dominant pink-noise sibilance",
+            "Sandstorm over pyramids, near-total granular howl",
+            "River mist at dawn, deep 3Hz tremolo wash",
+            "Ancient scribe's paper, aggressive transient + crackle",
+            "Clay-tablet scribe mutter, hard L/R stereo doubling",
+            "Temple smoke rising, slow-bloom env filter rise",
+            // SHIMMER
+            "Goddess ritual rattle, extreme-speed granular shake",
+            "Stars of heaven, +12 pitch + prime-tap twinkle matrix",
+            "Sacred blue-stone crystal, near-total phase-vocoder freeze",
+            "Tutankhamun gold mask, dominant 2kHz golden peak",
+            "Sun god's sky-vessel, wide stereo + burning heat",
+            "Radiant sun crystal, dominant comb filter spikes",
+            "Stepped temple at dawn, slow pan + filter opening",
+            // DARK
+            "Fall into the abyss, extreme HF kill + tail collapse",
+            "Underworld queen's throne, total reverse-reverb menace",
+            "Sealed pharaoh's chamber, dominant hollow comb + growl",
+            "Chaos serpent rising, writhing ±18st pitch LFO",
+            "Demon of infants, max 6-bit aliasing + random stabs",
+            "Gate of plague, held utterance + booming gates",
+            "Storm-demon king, dominant choking wind + granular"
+        };
+        jassert(avIndex >= 0 && avIndex < kAvPresetCount);
+        return descs[avIndex];
+    }
 }

@@ -97,14 +97,8 @@ void AncientVoicesAudioProcessorEditor::configureKnob(juce::Slider& s, juce::Lab
 AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoicesAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p), tooltipWindow(this)
 {
-    if (!licenseFile.existsAsFile()) {
-        getSerialKeyFromUser([this](juce::String u, juce::String k) {
-            if (!u.isEmpty() && !k.isEmpty()) {
-                if (!validateLicenseKey(u, k))
-                    getSerialKeyFromUser([this](juce::String u2, juce::String k2){ validateLicenseKey(u2, k2); }, true);
-            }
-        }, false);
-    }
+    // No license prompt: Ancient Voices is sold as a one-time purchase with no
+    // serial keys (customers never receive a User ID / License Key).
 
     titleLabel.setText("ANCIENT VOICES", juce::dontSendNotification);
     titleLabel.setFont(juce::Font("Helvetica Neue", 30.0f, juce::Font::bold));

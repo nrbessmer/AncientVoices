@@ -8,6 +8,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <rubberband/RubberBandStretcher.h>
 #include "DSPModules.h"
+#include "VoiceEngine.h"
 class AncientVoicesAudioProcessor  : public juce::AudioProcessor
 {
 public:
@@ -211,7 +212,7 @@ public:
 
     // Current profile settings
     ProfileSettings currentProfile;
-    int profileIndex;
+    int profileIndex = 0;
 
     // Effect Toggles
     bool stutterEnabled;
@@ -313,6 +314,28 @@ public:
     // Session 1 DSP modules — instantiated once, prepared in
     // prepareToPlay(), driven per-preset from applyProfileEffects().
     // ------------------------------------------------------------
+    // ------------------------------------------------------------
+    // Voice engine 1.1 (VoiceEngine.h): latency-compensated pitch /
+    // formant / harmony, plus click-free replacements for the old
+    // block-based doubler, echo, instability and stutter.
+    // ------------------------------------------------------------
+    AV2::StreamingShifter mainShifter, formantStage, harmShifterA, harmShifterB;
+    AV2::HardTune         hardTune;
+    AV2::Doubler          doubler;
+    AV2::StereoEcho       echo, spacedEcho;
+    AV2::Drift            drift;
+    AV2::StutterGate      stutterGate;
+    AV2::WarmDrive        warmDrive;
+    AV2::DelayLine        dryAlign, bypassAlign, formantBypass, tuneAlign;
+    juce::AudioBuffer<float> dryAligned, voiceIn, formantIn, harmMono, harmA, harmB;
+    std::array<juce::dsp::IIR::Filter<float>, 4> phoneFilters;
+    int   engineLatency = 0, pitchLatency = 0, formantLatency = 0, tuneLookahead = 0;
+    float formantBlend = 0.0f;
+    float lastSemis = 0.0f, shiftBlend = 0.0f, harmBlend = 0.0f, lastAmp = 1.0f, lastPanL = 1.0f, lastPanR = 1.0f;
+    bool  harmRunning = false, pendingSwitch = false;
+    int   lastProfileForTrim = -1;
+    void  applyVoiceStage (juce::AudioBuffer<float>& buffer, float semis, float formantSemis, float harmony, bool tune);
+
     AV::LFO              lfo1;
     AV::EnvelopeFollower envFollower;
     AV::FormantShifter   formantShifter;

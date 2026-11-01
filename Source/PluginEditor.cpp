@@ -66,6 +66,11 @@ void LnF::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float
     const float from = bipolar ? (start + end) * 0.5f : start;
     juce::Path val;
     val.addCentredArc (c.x, c.y, r - thick, r - thick, 0.0f, juce::jmin (from, ang), juce::jmax (from, ang), true);
+    if (s.isMouseOverOrDragging())   // hover / drag glow: instant visual feedback
+    {
+        g.setColour (colour.withAlpha (0.22f));
+        g.strokePath (val, juce::PathStrokeType (thick * 2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
     g.setColour (colour);
     g.strokePath (val, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
@@ -204,7 +209,7 @@ void AncientVoicesAudioProcessorEditor::configureKnob(juce::Slider& s, juce::Lab
 }
 
 AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoicesAudioProcessor& p)
-    : AudioProcessorEditor(&p), audioProcessor(p), tooltipWindow(this)
+    : AudioProcessorEditor(&p), audioProcessor(p), tooltipWindow(this, 450)
 {
     // No license prompt: Ancient Voices is sold as a one-time purchase with no
     // serial keys (customers never receive a User ID / License Key).
@@ -250,6 +255,20 @@ AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoic
     pitchSlider.setNumDecimalPlacesToDisplay(1);
     pitchSlider.setTextValueSuffix(" st");
 
+    // snappier knobs: less travel per turn, double-click resets, shift-drag is fine control
+    {
+        const std::pair<juce::Slider*, const char*> knobs[] = { { &reverbSlider, "USER_REVERB" }, { &delaySlider, "USER_DELAY" },
+            { &driveSlider, "USER_DRIVE" }, { &outputSlider, "USER_OUTPUT" }, { &mixSlider, "MIX" }, { &pitchSlider, "USER_PITCH" } };
+        for (auto& [sl, id] : knobs)
+        {
+            sl->setMouseDragSensitivity (180);
+            if (auto* prm = state.getParameter (id))
+                sl->setDoubleClickReturnValue (true, (double) state.getParameterRange (id).convertFrom0to1 (prm->getDefaultValue()));
+            sl->setTooltip (sl->getTooltip() + "  (double-click: reset, shift-drag: fine)");
+        }
+    }
+    scope.setTooltip ("Live picture of your input (grey) and the transformed voice (cyan).");
+
     syncComboFromParameter();
 
     addAndMakeVisible(scope);
@@ -267,7 +286,7 @@ AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoic
     footerEmailLink.setTooltip("Email info@tullyedmvibe.com");
     addAndMakeVisible(footerEmailLink);
 
-    startTimerHz(20);
+    startTimerHz(30);
     setSize(900, 620);
 }
 

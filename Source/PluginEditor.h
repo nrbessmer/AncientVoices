@@ -35,7 +35,7 @@ namespace avui
     };
 
     // Input (grey) and output (cyan) waveforms overlaid on one dark panel.
-    class Scope : public juce::Component
+    class Scope : public juce::Component, public juce::SettableTooltipClient
     {
     public:
         void setData (std::vector<float> in, std::vector<float> out) { input = std::move (in); output = std::move (out); repaint(); }

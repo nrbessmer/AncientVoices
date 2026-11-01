@@ -221,7 +221,7 @@ void AncientVoicesAudioProcessor::prepareToPlay(double sampleRate, int samplesPe
         //DBG("Delay lines initialized for " << numOutputChannels << " channels.");
 
         // Initialize waveform buffers ensuring correct size
-        waveformBufferSize = std::max(1, samplesPerBlock * 2);  // Prevent zero size
+        waveformBufferSize = 2048;   // ~43 ms shown in the scope, independent of the host block size
         lastInputSamples.assign(waveformBufferSize, 0.0f);
         lastOutputSamples.assign(waveformBufferSize, 0.0f);
 
@@ -481,11 +481,17 @@ void AncientVoicesAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             std::unique_lock<std::mutex> lock (inputMutex, std::try_to_lock);
             if (lock.owns_lock() && ! lastInputSamples.empty())
             {
-                const int m = juce::jmin ((int) lastInputSamples.size(), numSamples);
-                std::fill (lastInputSamples.begin(), lastInputSamples.end(), 0.0f);
-                for (int channel = 0; channel < numChannels; ++channel)
-                    for (int sample = 0; sample < m; ++sample)
-                        lastInputSamples[(size_t) sample] += dryBuffer.getReadPointer(channel)[sample] / (float) numChannels;
+                // rolling window: keep the newest waveformBufferSize samples
+                const int size = (int) lastInputSamples.size();
+                const int m = juce::jmin (size, numSamples);
+                std::move (lastInputSamples.begin() + m, lastInputSamples.end(), lastInputSamples.begin());
+                for (int sample = 0; sample < m; ++sample)
+                {
+                    float v = 0.0f;
+                    for (int channel = 0; channel < numChannels; ++channel)
+                        v += dryBuffer.getReadPointer(channel)[numSamples - m + sample];
+                    lastInputSamples[(size_t) (size - m + sample)] = v / (float) numChannels;
+                }
             }
         }
 
@@ -587,11 +593,16 @@ void AncientVoicesAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             std::unique_lock<std::mutex> lock (outputMutex, std::try_to_lock);
             if (lock.owns_lock() && ! lastOutputSamples.empty())
             {
-                const int m = juce::jmin ((int) lastOutputSamples.size(), numSamples);
-                std::fill (lastOutputSamples.begin(), lastOutputSamples.end(), 0.0f);
-                for (int channel = 0; channel < numChannels; ++channel)
-                    for (int sample = 0; sample < m; ++sample)
-                        lastOutputSamples[(size_t) sample] += buffer.getReadPointer(channel)[sample] / (float) numChannels;
+                const int size = (int) lastOutputSamples.size();
+                const int m = juce::jmin (size, numSamples);
+                std::move (lastOutputSamples.begin() + m, lastOutputSamples.end(), lastOutputSamples.begin());
+                for (int sample = 0; sample < m; ++sample)
+                {
+                    float v = 0.0f;
+                    for (int channel = 0; channel < numChannels; ++channel)
+                        v += buffer.getReadPointer(channel)[numSamples - m + sample];
+                    lastOutputSamples[(size_t) (size - m + sample)] = v / (float) numChannels;
+                }
             }
         }
         // Apply ducking effect

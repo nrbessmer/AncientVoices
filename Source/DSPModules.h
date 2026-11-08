@@ -21,6 +21,7 @@
 #include <JuceHeader.h>
 #include <rubberband/RubberBandStretcher.h>
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <memory>
 #include <random>

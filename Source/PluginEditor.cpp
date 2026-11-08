@@ -17,7 +17,7 @@
 using namespace avui;
 
 //============================================================================== LookAndFeel
-LnF::LnF()
+LnF::LnF() : neon::LookAndFeel (Col::pink)
 {
     setColour (juce::ComboBox::backgroundColourId, Col::panelHi);
     setColour (juce::ComboBox::outlineColourId, Col::line);
@@ -47,59 +47,9 @@ juce::Label* LnF::createSliderTextBox (juce::Slider& s)
     return l;
 }
 
-void LnF::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float start, float end, juce::Slider& s)
-{
-    const auto colour = s.findColour (juce::Slider::rotarySliderFillColourId);
-    auto b = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (3.0f);
-    const float r = juce::jmin (b.getWidth(), b.getHeight()) * 0.5f;
-    const auto c = b.getCentre();
-    const float ang = start + pos * (end - start);
-    const float thick = juce::jmax (2.5f, r * 0.14f);
 
-    juce::Path track;
-    track.addCentredArc (c.x, c.y, r - thick, r - thick, 0.0f, start, end, true);
-    g.setColour (Col::line);
-    g.strokePath (track, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-    // bipolar knobs (pitch) fill from the centre
-    const bool bipolar = s.getMinimum() < 0.0 && s.getMaximum() > 0.0;
-    const float from = bipolar ? (start + end) * 0.5f : start;
-    juce::Path val;
-    val.addCentredArc (c.x, c.y, r - thick, r - thick, 0.0f, juce::jmin (from, ang), juce::jmax (from, ang), true);
-    if (s.isMouseOverOrDragging())   // hover / drag glow: instant visual feedback
-    {
-        g.setColour (colour.withAlpha (0.22f));
-        g.strokePath (val, juce::PathStrokeType (thick * 2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    }
-    g.setColour (colour);
-    g.strokePath (val, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-    const float inner = r - thick * 2.2f;
-    g.setColour (Col::panelHi);
-    g.fillEllipse (c.x - inner, c.y - inner, inner * 2, inner * 2);
-    g.setColour (Col::line);
-    g.drawEllipse (c.x - inner, c.y - inner, inner * 2, inner * 2, 1.0f);
-
-    juce::Path ptr;
-    ptr.addRoundedRectangle (-1.5f, -inner + 2.0f, 3.0f, inner * 0.55f, 1.5f);
-    g.setColour (Col::text);
-    g.fillPath (ptr, juce::AffineTransform::rotation (ang).translated (c.x, c.y));
-}
-
-void LnF::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box)
-{
-    auto r = juce::Rectangle<float> (0, 0, (float) w, (float) h).reduced (0.5f);
-    g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
-    g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (box.isMouseOver (true) ? Col::dim : Col::line);
-    g.drawRoundedRectangle (r, 5.0f, 1.0f);
-
-    const float ax = (float) w - 18.0f, ay = (float) h * 0.5f;
-    juce::Path arrow;
-    arrow.addTriangle (ax - 5.0f, ay - 2.5f, ax + 5.0f, ay - 2.5f, ax, ay + 3.5f);
-    g.setColour (Col::dim);
-    g.fillPath (arrow);
-}
 
 //============================================================================== Scope
 void Scope::paint (juce::Graphics& g)
@@ -480,7 +430,7 @@ void AncientVoicesAudioProcessorEditor::drawPanel(juce::Graphics& g, juce::Recta
 
 void AncientVoicesAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(Col::bg);
+    neon::paintBackdrop (g, getLocalBounds(), Col::pink, backdrop);
 
     if (logo.isValid())
         g.drawImage(logo, logoArea.toFloat(), juce::RectanglePlacement::centred);

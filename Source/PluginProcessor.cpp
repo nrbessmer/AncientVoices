@@ -4,8 +4,6 @@
 #include "PluginEditor.h"
 #include "Data/Presets.h"
 #include "Data/ProfileTrims.h"
-#include <sys/types.h>
-#include <sys/sysctl.h>
 #include <unistd.h>
 #include <rubberband/RubberBandStretcher.h>
 
@@ -164,6 +162,7 @@ void AncientVoicesAudioProcessor::prepareToPlay(double sampleRate, int samplesPe
         // Proceed with normal setup if licensed
     }
     this->sampleRate = sampleRate;
+    preparedBlockSize = juce::jmax (1, samplesPerBlock);
 
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sampleRate;
@@ -419,6 +418,25 @@ void AncientVoicesAudioProcessor::setLicenseStatus(bool status) {
     isLicensed = status;
 }
 void AncientVoicesAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+{
+    // Every DSP stage is prepared for samplesPerBlock. Some hosts (offline bounce,
+    // certain AU hosts) send larger blocks than they announced: process those in
+    // prepared-size slices instead of overrunning the stages' scratch buffers.
+    // Slices reference the host's memory (no allocation); there is no MIDI to split.
+    if (const int n = buffer.getNumSamples(); preparedBlockSize > 0 && n > preparedBlockSize)
+    {
+        for (int pos = 0; pos < n; pos += preparedBlockSize)
+        {
+            const int len = juce::jmin (preparedBlockSize, n - pos);
+            juce::AudioBuffer<float> slice (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), pos, len);
+            processBlockSlice (slice, midiMessages);
+        }
+        return;
+    }
+    processBlockSlice (buffer, midiMessages);
+}
+
+void AncientVoicesAudioProcessor::processBlockSlice(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     // License state tracked in isLicensed / isLicenseValid() / setLicenseStatus()
     // but NOT gating audio — plugin passes audio regardless so the host signal
@@ -3122,16 +3140,17 @@ double AncientVoicesAudioProcessor::getTailLengthSeconds() const { return 4.0; }
 //==============================================================================
 void AncientVoicesAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // Save parameters state using apvts
+    // copyState() flushes knob moves the APVTS has not written to its tree yet
+    // (and is safe off the message thread); apvts.state could save stale values.
     juce::MemoryOutputStream stream(destData, true);
-    apvts.state.writeToStream(stream);
+    apvts.copyState().writeToStream(stream);
 }
 
 void AncientVoicesAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     // Load parameters state using apvts
     juce::ValueTree tree = juce::ValueTree::readFromData(data, size_t (sizeInBytes));
-    if (tree.isValid())
+    if (tree.isValid() && tree.hasType (apvts.state.getType()))   // ignore foreign / corrupt data
     {
         apvts.replaceState(tree);
     }

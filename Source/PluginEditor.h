@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "TullyNeon.h"
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 #include <openssl/evp.h>
@@ -14,23 +15,20 @@ namespace avui
     // Tully EDM Vibe plugin theme (shared with Mister Low End / VocalScribe)
     namespace Col
     {
-        const juce::Colour bg       { 0xff0a0c10 };
-        const juce::Colour panel    { 0xff13171d };
-        const juce::Colour panelHi  { 0xff1b2129 };
-        const juce::Colour line     { 0xff2a323d };
-        const juce::Colour text     { 0xffd9e1ea };
-        const juce::Colour dim      { 0xff7d8896 };
+        const juce::Colour bg       = neon::Pal::night0;
+        const juce::Colour panel    = neon::Pal::glass;
+        const juce::Colour panelHi  = neon::Pal::glassHi;
+        const juce::Colour line     = neon::Pal::edge;
+        const juce::Colour text     = neon::Pal::text;
+        const juce::Colour dim      = neon::Pal::dim;
         const juce::Colour cyan     { 0xff2de2e6 };   // brand cyan
         const juce::Colour pink     { 0xffff2d8a };   // brand pink
     }
 
-    class LnF : public juce::LookAndFeel_V4
+    class LnF : public neon::LookAndFeel
     {
     public:
         LnF();
-        void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos, float start, float end, juce::Slider&) override;
-        void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
-        juce::Font getComboBoxFont (juce::ComboBox&) override { return juce::Font (juce::FontOptions (14.0f)); }
         juce::Label* createSliderTextBox (juce::Slider&) override;
     };
 
@@ -57,6 +55,7 @@ public:
 private:
     AncientVoicesAudioProcessor& audioProcessor;
     avui::LnF lnf;
+    neon::BackdropCache backdrop;
     juce::TooltipWindow tooltipWindow;
 
     juce::Image logo;

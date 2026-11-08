@@ -28,6 +28,8 @@ public:
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void processBlockSlice (juce::AudioBuffer<float>&, juce::MidiBuffer&);
+    int preparedBlockSize = 0;
 
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;

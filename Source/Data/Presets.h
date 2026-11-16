@@ -5,9 +5,9 @@
 //==============================================================================
 // Ancient Voices — Preset Reference Table
 //
-// 50 presets organized into 7 categories, rooted exclusively in Sumerian,
+// 62 presets organized into 8 categories, rooted exclusively in Sumerian,
 // Akkadian, Babylonian, Assyrian, Egyptian, and wider Mesopotamian traditions.
-// Maps 1:1 to SoundProfile::AV_00..AV_49 in PluginProcessor.h.
+// Maps 1:1 to SoundProfile::AV_00..AV_61 in PluginProcessor.h.
 //
 // Index layout:
 //   CHANT    : AV_00..AV_06   (7)
@@ -17,6 +17,7 @@
 //   BREATH   : AV_29..AV_35   (7)
 //   SHIMMER  : AV_36..AV_42   (7)
 //   DARK     : AV_43..AV_49   (7)
+//   FUSION   : AV_50..AV_61   (12)  ancient voices for modern tracks
 //
 // Era tags are informational only — they drive filterCutoff selection in
 // initializeProfiles() (Sumerian=4500Hz, Egyptian=5000Hz,
@@ -33,7 +34,8 @@ namespace AncientVoicesPresets
         Ritual,
         Breath,
         Shimmer,
-        Dark
+        Dark,
+        Fusion      // 1.x: ancient voices for modern productions
     };
 
     enum class Era
@@ -46,8 +48,8 @@ namespace AncientVoicesPresets
 
     struct PresetInfo
     {
-        int         avIndex;     // 0..49, maps to SoundProfile::AV_00 + avIndex
-        int         globalIndex; // 10..59, index into APVTS PROFILE_INDEX parameter
+        int         avIndex;     // 0..61, maps to SoundProfile::AV_00 + avIndex
+        int         globalIndex; // 10..71, index into APVTS PROFILE_INDEX parameter
         const char* name;        // Display name shown in ComboBox and display label
         Category    category;    // Category grouping
         Era         era;         // Era tag (drives filterCutoff in profile DSP)
@@ -55,8 +57,8 @@ namespace AncientVoicesPresets
 
     // MMV's 10 profiles occupy indices 0..9; AV presets occupy 10..59.
     static constexpr int kMmvProfileCount = 10;
-    static constexpr int kAvPresetCount   = 50;
-    static constexpr int kTotalProfiles   = kMmvProfileCount + kAvPresetCount; // 60
+    static constexpr int kAvPresetCount   = 62;
+    static constexpr int kTotalProfiles   = kMmvProfileCount + kAvPresetCount; // 72
 
     inline const PresetInfo& getPreset(int avIndex)
     {
@@ -123,7 +125,21 @@ namespace AncientVoicesPresets
             { 46, 56, "Apep Rising",           Category::Dark, Era::Egyptian            },
             { 47, 57, "Lamashtu",              Category::Dark, Era::AkkadianBabylonian  },
             { 48, 58, "Nergal's Gate",         Category::Dark, Era::AkkadianBabylonian  },
-            { 49, 59, "Pazuzu",                Category::Dark, Era::AkkadianBabylonian  }
+            { 49, 59, "Pazuzu",                Category::Dark, Era::AkkadianBabylonian  },
+
+            // ---- FUSION (AV_50..AV_61) ------------------------------------
+            { 50, 60, "Desert Techno Prayer",  Category::Fusion, Era::Mesopotamian       },
+            { 51, 61, "Afro Temple Call",      Category::Fusion, Era::Egyptian           },
+            { 52, 62, "Trailer Colossus",      Category::Fusion, Era::AkkadianBabylonian },
+            { 53, 63, "Oracle Whisper",        Category::Fusion, Era::Egyptian           },
+            { 54, 64, "Mantra Loop",           Category::Fusion, Era::Sumerian           },
+            { 55, 65, "Lo-Fi Papyrus",         Category::Fusion, Era::Egyptian           },
+            { 56, 66, "Stadium Ziggurat",      Category::Fusion, Era::Sumerian           },
+            { 57, 67, "Sufi Spin",             Category::Fusion, Era::Mesopotamian       },
+            { 58, 68, "Gilgamesh Hero",        Category::Fusion, Era::AkkadianBabylonian },
+            { 59, 69, "Ishtar Club Vox",       Category::Fusion, Era::AkkadianBabylonian },
+            { 60, 70, "Underworld Drop",       Category::Fusion, Era::Sumerian           },
+            { 61, 71, "Star Map of Nut",       Category::Fusion, Era::Egyptian           },
         };
 
         jassert(avIndex >= 0 && avIndex < kAvPresetCount);
@@ -141,6 +157,7 @@ namespace AncientVoicesPresets
             case Category::Breath:  return "BREATH";
             case Category::Shimmer: return "SHIMMER";
             case Category::Dark:    return "DARK";
+            case Category::Fusion:  return "FUSION";
         }
         return "";
     }
@@ -248,7 +265,20 @@ namespace AncientVoicesPresets
             "Chaos serpent rising, writhing ±18st pitch LFO",
             "Demon of infants, max 6-bit aliasing + random stabs",
             "Gate of plague, held utterance + booming gates",
-            "Storm-demon king, dominant choking wind + granular"
+            "Storm-demon king, dominant choking wind + granular",
+            // FUSION
+            "Ritual prayer for melodic techno: dark hall, dotted echoes",
+            "Call-and-response chant for afro house: doubled, bouncing taps",
+            "Trailer-size voice: octave-down stack, saturated, huge hall",
+            "Breathy oracle: close whisper air, lifted formant, light grains",
+            "Hypnotic loop: four-tap echoes that circle the stereo field",
+            "Worn papyrus: crushed and tape-warm, for lo-fi and boom bap",
+            "Arena anthem: wide doubled stack, bright long hall",
+            "Whirling dervish: slow spinning pan, soft chorus and room",
+            "Epic hero: fifth-up harmony, grit and a great hall",
+            "Modern lead: presence lift, slap echo, tight doubler",
+            "Drop voice: octave-down, distorted, hollow comb snarl",
+            "Night-sky goddess: reverse swell into octave-up shimmer",
         };
         jassert(avIndex >= 0 && avIndex < kAvPresetCount);
         return descs[avIndex];

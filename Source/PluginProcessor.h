@@ -83,7 +83,8 @@ public:
     //   BREATH   : AV_29..AV_35   (7 presets)
     //   SHIMMER  : AV_36..AV_42   (7 presets)
     //   DARK     : AV_43..AV_49   (7 presets)
-    // Total: 60 profiles (NumProfiles == 60)
+    //   FUSION   : AV_50..AV_61   (12 presets)
+    // Total: 72 profiles (NumProfiles == 72)
     enum class SoundProfile
     {
         Alpha,
@@ -104,6 +105,7 @@ public:
         AV_29, AV_30, AV_31, AV_32, AV_33, AV_34, AV_35,   // BREATH
         AV_36, AV_37, AV_38, AV_39, AV_40, AV_41, AV_42,   // SHIMMER
         AV_43, AV_44, AV_45, AV_46, AV_47, AV_48, AV_49,   // DARK
+        AV_50, AV_51, AV_52, AV_53, AV_54, AV_55, AV_56, AV_57, AV_58, AV_59, AV_60, AV_61,   // FUSION
         NumProfiles // Make sure to update the total count
     };
 

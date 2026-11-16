@@ -928,7 +928,7 @@ void AncientVoicesAudioProcessor::initializeProfiles()
     };
 
     // ============================================================
-    // Ancient Voices — 50 presets (AV_00..AV_49), SESSION 1
+    // Ancient Voices — 62 presets (AV_00..AV_61); AV_50..61 added in 1.x
     //
     // Each preset is individually configured from the authoritative
     // spec document. Using session-1 modules where possible:
@@ -2071,6 +2071,281 @@ void AncientVoicesAudioProcessor::initializeProfiles()
         s.flangerRate            = 2.0f;
         s.outputGain             = 0.75f;
         makeAV(49, s);
+    }
+
+    // =====================================================
+    //   FUSION (AV_50 .. AV_61) — 1.x: ancient voices for modern productions
+    // =====================================================
+    // AV_50 Desert Techno Prayer
+    //   dark hall + dotted 3/16 echo taps + slow filter breath
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.formantShiftSemitones  = -1.0f;
+        s.reverbAmount           = 0.70f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 40.0f;
+        s.reverbHfDampingDb      = -6.0f;
+        s.multiTapMix            = 0.45f;
+        s.multiTapTimesMs[0]     = 375.0f;
+        s.multiTapTimesMs[1]     = 750.0f;
+        s.multiTapGains[0]       = 0.6f;
+        s.multiTapGains[1]       = 0.4f;
+        s.multiTapPans[0]        = -0.6f;
+        s.multiTapPans[1]        = +0.6f;
+        s.lfo1RateHz             = 0.08f;
+        s.lfo1Depth              = 0.25f;
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::FilterCutoff;
+        s.outputGain             = 0.85f;
+        makeAV(50, s);
+    }
+
+    // AV_51 Afro Temple Call
+    //   doubled call + bouncing 1/8 taps + room
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.formantShiftSemitones  = -0.5f;
+        s.vocalDoublerDetuneAmount = 0.15f;
+        s.vocalDoublerDelayMs    = 16.0f;
+        s.chorusDepth            = 0.12f;
+        s.reverbAmount           = 0.35f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 15.0f;
+        s.reverbHfDampingDb      = -3.0f;
+        s.multiTapMix            = 0.40f;
+        s.multiTapTimesMs[0]     = 250.0f;
+        s.multiTapTimesMs[1]     = 500.0f;
+        s.multiTapGains[0]       = 0.55f;
+        s.multiTapGains[1]       = 0.35f;
+        s.multiTapPans[0]        = -0.8f;
+        s.multiTapPans[1]        = +0.8f;
+        s.outputGain             = 0.88f;
+        makeAV(51, s);
+    }
+
+    // AV_52 Trailer Colossus
+    //   octave-down harmonizer stack + grit + huge hall
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.harmonizerAmount       = 0.55f;
+        s.formantShiftSemitones  = -2.0f;
+        s.distortionAmount       = 0.28f;
+        s.compressionRatio       = 4.0f;
+        s.reverbAmount           = 0.85f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 60.0f;
+        s.reverbHfDampingDb      = -5.0f;
+        s.outputGain             = 0.82f;
+        makeAV(52, s);
+    }
+
+    // AV_53 Oracle Whisper
+    //   close breath air + lifted formant + light grain halo
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.formantShiftSemitones  = 2.0f;
+        s.noiseLevel             = 0.08f;
+        s.noiseColor             = AV::NoiseGenerator::Pink;
+        s.noiseHighPassHz        = 3500.0f;
+        s.noiseGated             = true;
+        s.granularMix            = 0.20f;
+        s.granularGrainSizeMs    = 80.0f;
+        s.granularDensity        = 12.0f;
+        s.granularPitchSpreadSemi = 0.2f;
+        s.granularPositionJitter = 0.3f;
+        s.reverbAmount           = 0.40f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 12.0f;
+        s.reverbHfDampingDb      = -2.0f;
+        s.outputGain             = 0.9f;
+        makeAV(53, s);
+    }
+
+    // AV_54 Mantra Loop
+    //   four-tap echoes circling the stereo field + slow pan
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.formantShiftSemitones  = -1.0f;
+        s.multiTapMix            = 0.60f;
+        s.multiTapTimesMs[0]     = 280.0f;
+        s.multiTapTimesMs[1]     = 375.0f;
+        s.multiTapTimesMs[2]     = 601.0f;
+        s.multiTapTimesMs[3]     = 751.0f;
+        s.multiTapGains[0]       = 0.6f;
+        s.multiTapGains[1]       = 0.5f;
+        s.multiTapGains[2]       = 0.4f;
+        s.multiTapGains[3]       = 0.3f;
+        s.multiTapPans[0]        = -1.0f;
+        s.multiTapPans[1]        = +1.0f;
+        s.multiTapPans[2]        = -0.4f;
+        s.multiTapPans[3]        = +0.4f;
+        s.lfo1RateHz             = 0.15f;
+        s.lfo1Depth              = 0.35f;
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Pan;
+        s.reverbAmount           = 0.45f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 20.0f;
+        s.reverbHfDampingDb      = -4.0f;
+        s.outputGain             = 0.85f;
+        makeAV(54, s);
+    }
+
+    // AV_55 Lo-Fi Papyrus
+    //   bit-crushed, gritty, small dark room
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.formantShiftSemitones  = -0.5f;
+        s.bitcrushMix            = 0.32f;
+        s.bitcrushBitDepth       = 10.0f;
+        s.bitcrushSampleRateHz   = 16000.0f;
+        s.distortionAmount       = 0.22f;
+        s.lfo1RateHz             = 0.4f;
+        s.lfo1Depth              = 0.12f;
+        s.lfo1Shape              = AV::LFO::Random;
+        s.lfo1Dest               = AV::ModDest::Pitch;
+        s.reverbAmount           = 0.22f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 5.0f;
+        s.reverbHfDampingDb      = -18.0f;
+        s.outputGain             = 0.88f;
+        makeAV(55, s);
+    }
+
+    // AV_56 Stadium Ziggurat
+    //   wide doubled stack + harmony + bright long hall
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.harmonizerAmount       = 0.30f;
+        s.vocalDoublerDetuneAmount = 0.18f;
+        s.vocalDoublerDelayMs    = 20.0f;
+        s.chorusDepth            = 0.20f;
+        s.dynEqMix               = 0.6f;
+        s.dynEqFreqHz            = 3200.0f;
+        s.dynEqQ                 = 1.6f;
+        s.dynEqTargetGainDb      = 4.5f;
+        s.dynEqThreshold         = 0.08f;
+        s.reverbAmount           = 0.75f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 30.0f;
+        s.reverbHfDampingDb      = -1.0f;
+        s.outputGain             = 0.85f;
+        makeAV(56, s);
+    }
+
+    // AV_57 Sufi Spin
+    //   slow spinning pan + soft chorus + stone room
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.formantShiftSemitones  = -0.5f;
+        s.chorusDepth            = 0.15f;
+        s.flangerRate            = 0.25f;
+        s.lfo1RateHz             = 0.25f;
+        s.lfo1Depth              = 0.45f;
+        s.lfo1Shape              = AV::LFO::Sine;
+        s.lfo1Dest               = AV::ModDest::Pan;
+        s.reverbAmount           = 0.50f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 18.0f;
+        s.reverbHfDampingDb      = -4.0f;
+        s.outputGain             = 0.9f;
+        makeAV(57, s);
+    }
+
+    // AV_58 Gilgamesh Hero
+    //   fifth-up harmony + grit + great hall
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.harmonizerAmount       = 0.45f;
+        s.formantShiftSemitones  = -1.0f;
+        s.distortionAmount       = 0.15f;
+        s.compressionRatio       = 3.5f;
+        s.delayAmount            = 0.14f;
+        s.reverbAmount           = 0.70f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 45.0f;
+        s.reverbHfDampingDb      = -3.0f;
+        s.outputGain             = 0.85f;
+        makeAV(58, s);
+    }
+
+    // AV_59 Ishtar Club Vox
+    //   presence lift + slap echo + tight doubler, a modern lead
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.vocalDoublerDetuneAmount = 0.12f;
+        s.vocalDoublerDelayMs    = 12.0f;
+        s.chorusDepth            = 0.08f;
+        s.compressionRatio       = 3.5f;
+        s.dynEqMix               = 0.7f;
+        s.dynEqFreqHz            = 3000.0f;
+        s.dynEqQ                 = 1.5f;
+        s.dynEqTargetGainDb      = 5.0f;
+        s.dynEqThreshold         = 0.06f;
+        s.multiTapMix            = 0.35f;
+        s.multiTapTimesMs[0]     = 120.0f;
+        s.multiTapTimesMs[1]     = 250.0f;
+        s.multiTapGains[0]       = 0.5f;
+        s.multiTapGains[1]       = 0.35f;
+        s.multiTapPans[0]        = -0.6f;
+        s.multiTapPans[1]        = +0.6f;
+        s.reverbAmount           = 0.30f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 20.0f;
+        s.reverbHfDampingDb      = -2.0f;
+        s.outputGain             = 0.9f;
+        makeAV(59, s);
+    }
+
+    // AV_60 Underworld Drop
+    //   octave-down + distortion + hollow comb snarl
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = -12.0f;
+        s.formantShiftSemitones  = -2.0f;
+        s.distortionAmount       = 0.40f;
+        s.combFreqHz             = 220.0f;
+        s.combFeedback           = 0.6f;
+        s.combMix                = 0.35f;
+        s.compressionRatio       = 5.0f;
+        s.reverbAmount           = 0.45f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 10.0f;
+        s.reverbHfDampingDb      = -8.0f;
+        s.outputGain             = 0.8f;
+        makeAV(60, s);
+    }
+
+    // AV_61 Star Map of Nut
+    //   reverse swell into an octave-up grain shimmer
+    {
+        ProfileSettings s{};
+        s.pitchShiftAmount       = 0.0f;
+        s.formantShiftSemitones  = 1.0f;
+        s.reverseReverbMix       = 0.55f;
+        s.reverseReverbWindowSec = 2.0f;
+        s.granularMix            = 0.30f;
+        s.granularGrainSizeMs    = 120.0f;
+        s.granularDensity        = 10.0f;
+        s.granularPitchBaseSemi  = 12.0f;
+        s.granularPitchSpreadSemi = 0.3f;
+        s.granularPositionJitter = 0.4f;
+        s.reverbAmount           = 0.80f;
+        s.useEnhancedReverb      = true;
+        s.reverbPreDelayMs       = 50.0f;
+        s.reverbHfDampingDb      = -2.0f;
+        s.outputGain             = 0.82f;
+        makeAV(61, s);
     }
 }
 void AncientVoicesAudioProcessor::applyProfileEffects(juce::AudioBuffer<float>& buffer)

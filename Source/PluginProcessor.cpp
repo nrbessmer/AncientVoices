@@ -1,5 +1,6 @@
 
 #include <juce_dsp/juce_dsp.h>
+#include "TullyLicence.h"
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Data/Presets.h"
@@ -24,6 +25,8 @@ AncientVoicesAudioProcessor::AncientVoicesAudioProcessor()
       repeaterEnabled (false),
       apvts (*this, nullptr, "Parameters", createParameters())
 {
+    tully::licence ("Ancient Voices");   // purchase activation (TullyLicence.h)
+
     // Initialize profiles with their settings
     initializeProfiles();
     // Set currentProfile to the initial profile
@@ -419,6 +422,8 @@ void AncientVoicesAudioProcessor::setLicenseStatus(bool status) {
 }
 void AncientVoicesAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
+    if (! tully::licence().ok()) return;   // not activated yet: the sound passes through untouched
+
     // Every DSP stage is prepared for samplesPerBlock. Some hosts (offline bounce,
     // certain AU hosts) send larger blocks than they announced: process those in
     // prepared-size slices instead of overrunning the stages' scratch buffers.

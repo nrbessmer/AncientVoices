@@ -2,6 +2,7 @@
 // (c)(p) 2026 Tully EDM Vibe
 
 #include "PluginEditor.h"
+#include "TullyLicence.h"
 #include "PluginProcessor.h"
 #include "Data/Presets.h"
 #include "TullyLogoData.h"
@@ -238,6 +239,8 @@ AncientVoicesAudioProcessorEditor::AncientVoicesAudioProcessorEditor(AncientVoic
 
     startTimerHz(30);
     setSize(900, 620);
+
+    tully::addActivation (*this);   // activation screen until this Mac is licensed
 }
 
 AncientVoicesAudioProcessorEditor::~AncientVoicesAudioProcessorEditor()
